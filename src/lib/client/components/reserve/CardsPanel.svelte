@@ -1,0 +1,159 @@
+<script>
+  import { send } from '$lib/client/socket.js';
+  import {
+    CARD_CATALOG,
+    CARD_ORDER,
+    getCard,
+    meetsTierRequirement
+  } from '$lib/shared/reserve/cardCatalog.js';
+  import { getTierByScore } from '$lib/shared/reserve/loanCatalog.js';
+
+  let { state: gs, mySeat } = $props();
+
+  const me = $derived(gs.seats.find((s) => s.seat === mySeat));
+  const tier = $derived(getTierByScore(me?.creditScore ?? 0));
+  const owned = $derived(
+    Array.isArray(me?.creditCards) ? me.creditCards.filter((c) => c.status === 'active') : []
+  );
+  const ownedCardIds = $derived(new Set(owned.map((o) => o.cardId)));
+
+  function fmt(v) {
+    if (typeof v !== 'number') return '—';
+    return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+
+  function apply(cardId) {
+    send({ type: 'requestCreditCard', cardId });
+  }
+  function cancel(instanceId) {
+    send({ type: 'cancelCreditCard', instanceId });
+  }
+
+  function eligibility(card) {
+    if (ownedCardIds.has(card.id)) return { ok: false, reason: 'You already hold this card.' };
+    if (!meetsTierRequirement(me ?? {}, card.requiredTier)) {
+      return { ok: false, reason: `Requires ${card.requiredTier} credit (you are ${tier.name}).` };
+    }
+    if ((me?.cash ?? 0) < card.signingFee) {
+      return { ok: false, reason: `Need $${fmt(card.signingFee)} for signing fee.` };
+    }
+    return { ok: true };
+  }
+</script>
+
+<div class="cards">
+  <section class="owned">
+    <h3>Your cards</h3>
+    {#if owned.length === 0}
+      <p class="empty">You hold no credit cards.</p>
+    {:else}
+      <ul>
+        {#each owned as inst (inst.id)}
+          {@const card = getCard(inst.cardId)}
+          {#if card}
+            <li>
+              <div class="head">
+                <strong>{card.name}</strong>
+                <span class="fee">${fmt(card.rotatingFee)}/turn</span>
+              </div>
+              <p class="blurb">{card.blurb}</p>
+              <button onclick={() => cancel(inst.id)} disabled={(me?.cash ?? 0) < card.cancelFee}>
+                Cancel — ${fmt(card.cancelFee)}
+              </button>
+            </li>
+          {/if}
+        {/each}
+      </ul>
+    {/if}
+  </section>
+
+  <section class="catalog">
+    <h3>Available cards</h3>
+    <p class="ink-mute small">
+      Each card charges a signing fee on issue and a per-turn rotating fee. If you can't pay
+      the rotating fee on a turn, the card auto-cancels.
+    </p>
+    <ul class="card-grid">
+      {#each CARD_ORDER as cid (cid)}
+        {@const card = CARD_CATALOG[cid]}
+        {@const elig = eligibility(card)}
+        <li class="card" class:owned={ownedCardIds.has(cid)} class:locked={!elig.ok && !ownedCardIds.has(cid)}>
+          <header>
+            <strong>{card.name}</strong>
+            <span class="tier-tag">{card.requiredTier}+</span>
+          </header>
+          <p class="blurb">{card.blurb}</p>
+          <ul class="fees">
+            <li>Sign: <strong>${fmt(card.signingFee)}</strong></li>
+            <li>Turn: <strong>${fmt(card.rotatingFee)}</strong></li>
+            <li>Cancel: <strong>${fmt(card.cancelFee)}</strong></li>
+            {#if card.signupBonus > 0}
+              <li class="bonus">Bonus: <strong>+${fmt(card.signupBonus)}</strong></li>
+            {/if}
+          </ul>
+          {#if ownedCardIds.has(cid)}
+            <span class="status-tag owned-tag">Owned</span>
+          {:else if !elig.ok}
+            <span class="status-tag locked-tag" title={elig.reason}>{elig.reason}</span>
+          {:else}
+            <button class="primary apply-btn" onclick={() => apply(cid)}>
+              Apply — ${fmt(card.signingFee)}
+            </button>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  </section>
+</div>
+
+<style>
+  .cards { display: flex; flex-direction: column; gap: 1rem; }
+  section { padding: 0.6rem 0.8rem; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 6px; }
+  section h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+
+  .owned ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+  .owned li { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 0.5rem 0.6rem; }
+  .owned .head { display: flex; justify-content: space-between; align-items: center; }
+  .owned .fee { font-family: monospace; font-size: 0.85rem; color: var(--ink-mute); }
+  .owned .blurb { margin: 0.3rem 0; font-size: 0.82rem; color: var(--ink-mute); }
+  .owned button { font-size: 0.78rem; }
+  .empty { color: var(--ink-mute); font-style: italic; margin: 0.4rem 0; font-size: 0.85rem; }
+
+  .card-grid {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.6rem;
+  }
+  .card {
+    background: var(--panel);
+    border: 2px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 0.6rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    transition: border-color 0.15s ease;
+  }
+  .card.owned { border-color: var(--good, #2e7d32); }
+  .card.locked { opacity: 0.7; }
+  .card header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+  .card header strong { font-size: 0.9rem; }
+  .tier-tag {
+    background: var(--accent);
+    color: #fff;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+  }
+  .card .blurb { font-size: 0.78rem; color: var(--ink-mute); margin: 0; min-height: 2.4em; }
+  .card .fees { list-style: none; padding: 0; margin: 0; font-size: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .card .fees li.bonus { color: var(--good, #2e7d32); }
+  .status-tag { font-size: 0.72rem; color: var(--ink-mute); font-style: italic; }
+  .status-tag.owned-tag { color: var(--good, #2e7d32); font-weight: 600; }
+  .apply-btn { font-size: 0.8rem; }
+  .small { font-size: 0.78rem; }
+</style>

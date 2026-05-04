@@ -1,0 +1,87 @@
+:root {
+  --bg: #f4ecd8;
+  --board-bg: #c8e6c9;
+  --ink: #111;
+  --ink-mute: #555;
+  --line: #1a1a1a;
+  --accent: #1b5e20;
+  --danger: #b71c1c;
+  --warn: #ef6c00;
+  --good: #2e7d32;
+  --panel: #fffaf0;
+  --panel-border: #d6c8a3;
+
+  --brown: #955436;
+  --lightblue: #aae0fa;
+  --pink: #d93a96;
+  --orange: #f7941d;
+  --red: #ed1b24;
+  --yellow: #fef200;
+  --green: #1fb25a;
+  --darkblue: #0072bb;
+  --rail: #1a1a1a;
+  --utility: #d3d3d3;
+
+  --player-0: #d32f2f;
+  --player-1: #1976d2;
+  --player-2: #388e3c;
+  --player-3: #fbc02d;
+  --player-4: #7b1fa2;
+  --player-5: #f57c00;
+  --player-6: #00838f;
+  --player-7: #c2185b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.45rem 0.9rem;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+button:hover:not(:disabled) { background: #fff; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+button.primary:hover:not(:disabled) { background: #2e7d32; }
+button.danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+input[type="text"], input[type="number"], select {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.too-small {
+  display: none;
+  padding: 2rem;
+  text-align: center;
+  font-size: 1.1rem;
+}
+
+@media (max-width: 899px) {
+  .game-root { display: none !important; }
+  .too-small { display: block; }
+}

@@ -1,0 +1,15 @@
+// Config consumed by @sveltejs/adapter-cloudflare. Tells the adapter where to
+// emit its generated SvelteKit Worker. Kept separate from wrangler.jsonc so
+// our custom `src/worker.js` (which wraps the SvelteKit worker and routes /ws
+// to the GameDO Durable Object) is not overwritten on every build.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "monopoly-board",
+  "compatibility_date": "2026-05-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": ".svelte-kit/cf-worker/index.js",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".svelte-kit/cloudflare"
+  }
+}

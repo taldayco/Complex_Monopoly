@@ -1,0 +1,14 @@
+node_modules/
+.svelte-kit/
+build/
+rooms/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
