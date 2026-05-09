@@ -9,7 +9,8 @@ import {
   COMMUNITY_CHEST_INDICES,
   AUCTION_MIN_BID,
   BUY_MORTGAGE_PTR,
-  BUY_MORTGAGE_TERMS
+  BUY_MORTGAGE_TERMS,
+  COLOR_GROUPS
 } from '../shared/constants.js';
 import { advancePosition, moveTo, rollDice as rollDiceFn } from './movement.js';
 import { computeRent } from './rent.js';
@@ -57,6 +58,16 @@ import {
   payCardBalance,
   accrueCardInterest
 } from './reserve/cards.js';
+import {
+  getRailRebateFor,
+  getUtilityRebateFor,
+  getBaseRentRebateFor,
+  getGenericRentRebateFor,
+  getBlueGreenRentRebateFor,
+  getGoBonusFor,
+  getGoLandingBonusFor,
+  getOtherLandingBonusFor
+} from '../shared/reserve/cardCatalog.js';
 import {
   drawReserveCard,
   discardReserveCard,
@@ -218,6 +229,7 @@ function doRollDice(state, action, ctx, log) {
 
   const { passedGo } = advancePosition(seat, roll.total);
   if (passedGo) log('passGo', action.seat, { amount: GO_SALARY });
+  applyGoCardBonuses(state, action.seat, passedGo, log);
 
   resolveLanding(state, action.seat, ctx, log, { diceTotal: roll.total });
   finalizeTurnPhase(state, roll.doubles);
@@ -311,13 +323,88 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
         if (ownerSeat.inJail) {
           // Classic rule: rent still collected even if owner in jail.
         }
+        // goRewards: bank pays the owner a flat per-landing bonus regardless
+        // of whether rent is owed (mortgaged or otherwise).
+        const ownerLandingBonus = getOtherLandingBonusFor(ownerSeat);
+        if (ownerLandingBonus > 0) {
+          ownerSeat.cash = Math.round((ownerSeat.cash + ownerLandingBonus) * 100) / 100;
+          log('cardLandingBonus', prop.ownerSeat, {
+            spaceIndex: seat.position,
+            amount: ownerLandingBonus,
+            landerSeat: seatIndex
+          });
+        }
         const rent = computeRent(state, seat.position, opts.diceTotal ?? 0, opts.rentOpts ?? {});
         if (rent > 0) {
-          log('rentDue', seatIndex, { creditor: prop.ownerSeat, amount: rent });
-          tryDebit(state, seatIndex, rent, { type: 'rent', creditorSeat: prop.ownerSeat }, log);
+          const rebate = computeRentRebate(state, seat, space, prop, seatIndex);
+          const bankCovers = Math.round(rent * rebate * 100) / 100;
+          const playerOwes = Math.round((rent - bankCovers) * 100) / 100;
+          log('rentDue', seatIndex, {
+            creditor: prop.ownerSeat,
+            amount: rent,
+            playerOwes,
+            bankCovers,
+            rebate
+          });
+          if (bankCovers > 0) {
+            ownerSeat.cash = Math.round((ownerSeat.cash + bankCovers) * 100) / 100;
+          }
+          if (playerOwes > 0) {
+            tryDebit(state, seatIndex, playerOwes, { type: 'rent', creditorSeat: prop.ownerSeat }, log);
+          }
         }
       }
       return;
+    }
+  }
+}
+
+// Sum of applicable card-driven rent rebate fractions for the debtor seat,
+// capped at 1. The owner still receives full rent; the bank covers the
+// rebated portion. baseRentRebate only applies when rent IS unimproved
+// single rent (no houses, owner doesn't hold the full color group).
+function computeRentRebate(state, seat, space, prop, seatIndex) {
+  let total = getGenericRentRebateFor(seat);
+  if (space.type === 'railroad') {
+    total += getRailRebateFor(seat);
+  } else if (space.type === 'utility') {
+    total += getUtilityRebateFor(seat);
+  } else if (space.type === 'property') {
+    if (space.colorGroup === 'darkblue' || space.colorGroup === 'green') {
+      total += getBlueGreenRentRebateFor(seat);
+    }
+    const isBaseRent =
+      prop.houses === 0 &&
+      !ownsAllInGroupForRebate(state, prop.ownerSeat, space.colorGroup);
+    if (isBaseRent) {
+      total += getBaseRentRebateFor(seat);
+    }
+  }
+  return Math.min(1, Math.max(0, total));
+}
+
+function ownsAllInGroupForRebate(state, ownerSeat, group) {
+  const indices = COLOR_GROUPS[group] ?? [];
+  return indices.length > 0 && indices.every((i) => state.properties[i]?.ownerSeat === ownerSeat);
+}
+
+// Card-driven GO bonuses, applied immediately after the engine collects
+// GO_SALARY. Only fires when salary was actually collected (`passedGo`).
+// Landing on GO yields goLandingBonus; passing without landing yields goBonus.
+function applyGoCardBonuses(state, seatIndex, passedGo, log) {
+  if (!passedGo) return;
+  const seat = state.seats[seatIndex];
+  if (seat.position === GO_INDEX) {
+    const bonus = getGoLandingBonusFor(seat);
+    if (bonus > 0) {
+      seat.cash = Math.round((seat.cash + bonus) * 100) / 100;
+      log('cardGoLandingBonus', seatIndex, { amount: bonus });
+    }
+  } else {
+    const bonus = getGoBonusFor(seat);
+    if (bonus > 0) {
+      seat.cash = Math.round((seat.cash + bonus) * 100) / 100;
+      log('cardGoBonus', seatIndex, { amount: bonus });
     }
   }
 }
@@ -369,28 +456,29 @@ function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, diceTot
 
   switch (e.kind) {
     case 'moveTo': {
-      moveTo(seat, e.target, { collectGoOnPass: !!e.collectGo });
-      if (e.collectGo && seat.position === GO_INDEX) {
-        // moveTo already handled the salary if we crossed GO; landing on GO is just a position.
-      }
+      const r = moveTo(seat, e.target, { collectGoOnPass: !!e.collectGo });
+      applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
       resolveLanding(state, seatIndex, ctx, log, { diceTotal });
       return;
     }
     case 'move': {
       // "Go back 3" — no GO collection.
+      let r;
       if (e.steps < 0) {
-        advancePosition(seat, e.steps, { collectGoOnPass: false });
+        r = advancePosition(seat, e.steps, { collectGoOnPass: false });
       } else {
-        advancePosition(seat, e.steps);
+        r = advancePosition(seat, e.steps);
       }
+      applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
       resolveLanding(state, seatIndex, ctx, log, { diceTotal });
       return;
     }
     case 'moveToNearestRailroad': {
       const target = nearestRailroadFrom(seat.position + 1);
-      moveTo(seat, target, { collectGoOnPass: true });
+      const r = moveTo(seat, target, { collectGoOnPass: true });
+      applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
       // Special: if owned, pay 2x rent.
       resolveLanding(state, seatIndex, ctx, log, {
@@ -401,7 +489,8 @@ function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, diceTot
     }
     case 'moveToNearestUtility': {
       const target = nearestUtilityFrom(seat.position + 1);
-      moveTo(seat, target, { collectGoOnPass: true });
+      const r = moveTo(seat, target, { collectGoOnPass: true });
+      applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
       // Special: if owned, pay 10x dice (regardless of utilities owned). Roll fresh dice.
       const utilityRoll = rollDiceFn(ctx.rng);
@@ -783,6 +872,7 @@ function doRollForJail(state, action, ctx, log) {
     // If they paid on the third turn (mustPay), don't grant doubles bonus turn.
     const { passedGo } = advancePosition(seat, r.roll.total);
     if (passedGo) log('passGo', action.seat, { amount: GO_SALARY });
+    applyGoCardBonuses(state, action.seat, passedGo, log);
     resolveLanding(state, action.seat, ctx, log, { diceTotal: r.roll.total });
     state.turn.phase = state.pendingAction ? 'resolving' : 'endable';
   } else if (r.insolvent) {
@@ -1032,6 +1122,8 @@ function doPayLoanInstallment(state, action, ctx, log) {
   log('loanPayment', action.seat, {
     loanId: action.loanId,
     paid: r.paid,
+    bankCovered: r.bankCovered ?? 0,
+    due: r.due,
     balance: r.loan.balance,
     closed: r.loan.status === 'closed'
   });

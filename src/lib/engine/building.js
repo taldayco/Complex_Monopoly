@@ -1,6 +1,16 @@
 import { BOARD } from '../shared/board.js';
 import { COLOR_GROUPS } from '../shared/constants.js';
 import { ownsAllInGroup } from './selectors.js';
+import { getDevelopmentRebateFor } from '../shared/reserve/cardCatalog.js';
+
+// Effective house/hotel cost after card-driven development rebates. The bank
+// covers the rebated portion implicitly — no separate accounting needed since
+// houses/hotels are bank-owned inventory.
+function effectiveDevelopmentCost(seat, listedCost) {
+  const rebate = getDevelopmentRebateFor(seat);
+  if (rebate <= 0) return listedCost;
+  return Math.round(listedCost * (1 - rebate) * 100) / 100;
+}
 
 // "Even build" rule: you must build/sell across the color group such that no two properties
 // differ in house count by more than 1.
@@ -38,9 +48,10 @@ export function canBuyHouse(state, seatIndex, spaceIndex) {
 
   // Cash.
   const seat = state.seats[seatIndex];
-  if (seat.cash < space.houseCost) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
+  const cost = effectiveDevelopmentCost(seat, space.houseCost);
+  if (seat.cash < cost) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
 
-  return { ok: true, cost: space.houseCost };
+  return { ok: true, cost, listedCost: space.houseCost };
 }
 
 export function buyHouse(state, seatIndex, spaceIndex) {
@@ -59,8 +70,9 @@ export function buyHouse(state, seatIndex, spaceIndex) {
     state.bank.housesAvailable -= 1;
   }
   prop.houses = target;
-  seat.cash -= space.houseCost;
-  return { ok: true, cost: space.houseCost, houses: target };
+  const cost = effectiveDevelopmentCost(seat, space.houseCost);
+  seat.cash = Math.round((seat.cash - cost) * 100) / 100;
+  return { ok: true, cost, listedCost: space.houseCost, houses: target };
 }
 
 export function canSellHouse(state, seatIndex, spaceIndex) {

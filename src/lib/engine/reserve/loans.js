@@ -9,7 +9,8 @@ import {
 import {
   getMaxLineFor,
   getMissedPaymentPenalty,
-  getPtrDiscountFor
+  getPtrDiscountFor,
+  getFirstInstallmentCoverageFor
 } from '../../shared/reserve/cardCatalog.js';
 
 let LOAN_ID_COUNTER = 0;
@@ -100,8 +101,15 @@ export function payLoanInstallment(seat, loanId) {
   if (!loan) return { error: 'NO_LOAN' };
   if (!loan.dueThisTurn) return { error: 'NOT_DUE' };
   const due = Math.min(loan.installment, loan.balance);
-  if (seat.cash < due) return { error: 'INSUFFICIENT_FUNDS' };
-  seat.cash = Math.round((seat.cash - due) * 100) / 100;
+  // vaultPlatinum: bank covers part of the first installment, capped so the
+  // bank's net recovery stays at least principal + $100. Player pays the rest
+  // out of cash; the loan balance is reduced by the full `due`.
+  const bankCovers = getFirstInstallmentCoverageFor(seat, loan);
+  const seatPays = Math.round((due - bankCovers) * 100) / 100;
+  if (seat.cash < seatPays) return { error: 'INSUFFICIENT_FUNDS' };
+  if (seatPays > 0) {
+    seat.cash = Math.round((seat.cash - seatPays) * 100) / 100;
+  }
   loan.balance = Math.round((loan.balance - due) * 100) / 100;
   loan.paymentsMade += 1;
   loan.dueThisTurn = false;
@@ -110,7 +118,7 @@ export function payLoanInstallment(seat, loanId) {
     loan.status = 'closed';
   }
   refreshLoanTurnResponded(seat);
-  return { ok: true, paid: due, loan };
+  return { ok: true, paid: seatPays, bankCovered: bankCovers, due, loan };
 }
 
 export function skipLoanInstallment(seat, loanId) {
