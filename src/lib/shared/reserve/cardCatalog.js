@@ -18,90 +18,131 @@ import {
 
 const TIER_RANK = Object.fromEntries(CREDIT_TIERS.map((t, i) => [t.name, i]));
 
+// Each card lists the bank that issues it, the up-front signing fee/bonus,
+// a fee charged when the holder passes GO, a cancellation fee, the credit
+// tier required to apply, the minimum credit line provided, the interest
+// rate charged on outstanding card balance every 4 turn rotations, and the
+// minimum per-cycle payment. `rotatingFee` is the legacy flat per-turn fee
+// (kept at 0 — the new interest-on-balance model replaces it but is not yet
+// wired on the engine side).
 export const CARD_CATALOG = {
   readingRail: {
     id: 'readingRail',
     name: 'Reading Rail Reserve',
+    bank: 'MM Credit Union',
     requiredTier: 'Fair',
-    signingFee: 25,
-    rotatingFee: 5,
-    cancelFee: 10,
-    signupBonus: 0,
+    signingFee: 0,
+    signupBonus: 200,
+    goFee: 0,
+    cancelFee: 400,
+    rotatingFee: 0,
+    minLine: 200,
+    interestRate: 0.30,
+    minPayment: 25,
     benefits: {
-      hysaBonus: 0.01,            // +1% HYSA — wired in Phase 7
-      railUtilityRentDiscount: 0.5 // 50% off rail/utility rent — wired later
+      hysaBonus: 0.01,            // +1% HYSA — WIRED
+      railRebate: 0.5,            // bank pays 50% of railroad payments — wired later
+      utilityRebate: 0.5,         // bank pays 50% of utility payments — wired later
+      baseRentRebate: 1.0         // bank pays 100% of base rent (no doubles, no developments) — wired later
     },
-    blurb: '+1% HYSA · 50% off rail/utility rent'
+    blurb: '+1% HYSA · bank covers 50% rail/utility · 100% base rent'
   },
   goRewards: {
     id: 'goRewards',
     name: 'GO Rewards',
-    requiredTier: 'Fair',
-    signingFee: 30,
-    rotatingFee: 5,
-    cancelFee: 10,
-    signupBonus: 0,
+    bank: 'MM Credit Union',
+    requiredTier: 'Good',
+    signingFee: 0,
+    signupBonus: 50,
+    goFee: 0,
+    cancelFee: 200,
+    rotatingFee: 0,
+    minLine: 400,
+    interestRate: 0.28,
+    minPayment: 25,
     benefits: {
-      goBonus: 50,                 // +$50 per GO pass — wired later
-      otherLandingBonus: 10        // +$10 per other player landing on yours — wired later
+      goBonus: 50,                 // +$50 when passing GO — wired later
+      goLandingBonus: 100,         // +$100 when landing on GO — wired later
+      otherLandingBonus: 10        // +$10 from bank when player lands on your property — wired later
     },
-    blurb: '+$50 per GO pass · +$10 per other player landing on your property'
+    blurb: '+$50 pass GO · +$100 land on GO · +$10 from bank per landing'
   },
   portfolioGold: {
     id: 'portfolioGold',
     name: 'Portfolio Gold',
+    bank: 'MM Credit Union',
     requiredTier: 'Good',
-    signingFee: 50,
-    rotatingFee: 10,
-    cancelFee: 25,
+    signingFee: 0,
     signupBonus: 0,
+    goFee: 30,
+    cancelFee: 100,
+    rotatingFee: 0,
+    minLine: 500,
+    interestRate: 0.26,
+    minPayment: 25,
     benefits: {
-      rentRebate: 0.15             // bank pays 15% of rent — wired later
+      rentRebate: 0.15,            // bank pays 15% of all rent and bills — wired later
+      developmentRebate: 0.15      // bank pays 15% of development purchases incl. permits — wired later
     },
-    blurb: 'Bank reimburses 15% of all rent paid'
-  },
-  vaultPlatinum: {
-    id: 'vaultPlatinum',
-    name: 'Vault Platinum',
-    requiredTier: 'Very Good',
-    signingFee: 75,
-    rotatingFee: 15,
-    cancelFee: 30,
-    signupBonus: 50,
-    benefits: {
-      maxLineBonus: 0.25,                    // +25% max loan line — WIRED
-      missedPaymentPenalty: 5,               // -5 instead of -10 — WIRED
-      bankPaysFirstInstallment: true         // wired later
-    },
-    blurb: '+25% max loan · softer skip-penalty · bank covers first installment'
+    blurb: 'Bank covers 15% of rent/bills · 15% of development costs'
   },
   boardwalkPreferred: {
     id: 'boardwalkPreferred',
     name: 'Boardwalk Preferred',
-    requiredTier: 'Excellent',
+    bank: 'Boardwalk National Bank',
+    requiredTier: 'Very Good',
     signingFee: 100,
-    rotatingFee: 20,
-    cancelFee: 50,
     signupBonus: 0,
+    goFee: 100,
+    cancelFee: 50,
+    rotatingFee: 0,
+    minLine: 1000,
+    interestRate: 0.24,
+    minPayment: 50,
     benefits: {
-      hysaBonus: 0.02,             // +2% HYSA — wired in Phase 7
+      hysaBonus: 0.02,             // +2% HYSA — WIRED
       maxLineBonus: 0.4,           // +40% max loan line — WIRED
-      blueRentDiscount: 0.5        // 50% off blue rent — wired later
+      blueGreenRentRebate: 0.5     // bank pays 50% of rent on blue/green — wired later
     },
-    blurb: '+2% HYSA · +40% max loan · 50% off blue rent'
+    blurb: '+2% HYSA · +40% max loan · bank covers 50% blue/green rent'
   },
   primeAdvantage: {
     id: 'primeAdvantage',
     name: 'Prime Advantage Gold',
+    bank: 'Boardwalk National Bank',
     requiredTier: 'Very Good',
-    signingFee: 50,
-    rotatingFee: 10,
-    cancelFee: 20,
+    signingFee: 100,
     signupBonus: 0,
+    goFee: 75,
+    cancelFee: 200,
+    rotatingFee: 0,
+    minLine: 800,
+    interestRate: 0.22,
+    minPayment: 50,
     benefits: {
-      ptrDiscount: 0.01            // -1% PTR on new loans — WIRED
+      hysaBonus: 0.0125,           // +1.25% HYSA — WIRED
+      ptrDiscount: 0.02            // -2% PTR on new loans — WIRED
     },
-    blurb: '-1% per-turn rate on new loans'
+    blurb: '+1.25% HYSA · -2% per-turn rate on new loans'
+  },
+  vaultPlatinum: {
+    id: 'vaultPlatinum',
+    name: 'Vault Platinum',
+    bank: 'Boardwalk National Bank',
+    requiredTier: 'Poor',           // no tier requirement in spec — anyone may apply
+    signingFee: 400,
+    signupBonus: 0,
+    goFee: 200,
+    cancelFee: 100,
+    rotatingFee: 0,
+    minLine: 1200,
+    interestRate: 0.20,
+    minPayment: 100,
+    benefits: {
+      missedPaymentPenalty: 5,               // -5 instead of -10 — WIRED
+      bankPaysFirstInstallment: true         // bank covers max of first installment while keeping recovery ≥ principal+$100 — wired later
+    },
+    blurb: 'Bank covers first installment · softer skip-penalty (-5)'
   }
 };
 

@@ -134,6 +134,8 @@ function applyEffect(state, seat, eff, ctx) {
       return applySpecialLoan(seat, eff);
     case 'bankPaysInstallment':
       return applyBankPaysInstallment(seat);
+    case 'revealWildcards':
+      return applyRevealWildcards(state, seat, eff.symbol);
     default:
       return { skipped: true, reason: 'UNKNOWN_EFFECT' };
   }
@@ -260,6 +262,27 @@ function applySpecialLoan(seat, eff) {
   seat.loans.push(loan);
   seat.cash = Math.round((seat.cash + principal) * 100) / 100;
   return { principal, term, ptr, totalDebt, installment, loanId: loan.id };
+}
+
+// Privately reveals a stock's wildcards to the drawing seat. Wildcards are
+// re-randomized on each deck reshuffle, so the reveal is sourced from the
+// live deck (not the catalog). Reveals are wiped automatically when the deck
+// reshuffles — see `clearStaleWildcardReveals` in reducer.js and the
+// reshuffle handling in marketOpen.js.
+function applyRevealWildcards(state, seat, symbol) {
+  const cat = STOCK_CATALOG[symbol];
+  if (!cat || cat.type !== 'volatile') {
+    return { skipped: true, reason: 'BAD_SYMBOL' };
+  }
+  const market = state.stocks?.market?.[symbol];
+  const deck = Array.isArray(market?.deck) ? market.deck : [];
+  const values = deck.filter((c) => c && c.wild).map((c) => c.value);
+  const inDeck = values.length;
+  if (!seat.revealedWildcards || typeof seat.revealedWildcards !== 'object') {
+    seat.revealedWildcards = {};
+  }
+  seat.revealedWildcards[symbol] = values;
+  return { symbol, wildCards: values, inDeck };
 }
 
 function applyBankPaysInstallment(seat) {

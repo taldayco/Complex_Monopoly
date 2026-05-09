@@ -16,8 +16,8 @@ function step(state, action, ctx = { rng: makeRng() }) {
   return r.state;
 }
 
-test('createStocksState seeds catalog prices and FP500 history', () => {
-  const s = createStocksState();
+test('createStocksState (no priming) seeds catalog prices and FP500 history', () => {
+  const s = createStocksState(0, { primeHistory: false });
   for (const sym of VOLATILE_STOCK_ORDER) {
     assert.equal(s.market[sym].price, STOCK_CATALOG[sym].start);
     assert.deepEqual(s.market[sym].history, [STOCK_CATALOG[sym].start]);
@@ -47,25 +47,31 @@ test('flipMarket draws one card per volatile stock and recomputes FP500', () => 
 test('buyShares moves cash to position and tracks cost basis', () => {
   const room = makeRoom(2);
   const seat = room.seats[0];
+  // Stocks are now primed at room creation, so the live price differs from
+  // the catalog start. Read it from the market.
+  const price = room.stocks.market.TPHT.price;
+  const expectedCost = Math.round(price * 3 * 100) / 100;
   const r = buyShares(seat, room.stocks, 'TPHT', 3);
   assert.equal(r.ok, true);
   assert.equal(r.qty, 3);
   assert.equal(seat.stockLots.TPHT, 3);
-  assert.equal(seat.stockCostBasis.TPHT, STOCK_CATALOG.TPHT.start * 3);
-  assert.equal(seat.cash, 1500 - STOCK_CATALOG.TPHT.start * 3);
+  assert.equal(seat.stockCostBasis.TPHT, expectedCost);
+  assert.equal(seat.cash, Math.round((1500 - expectedCost) * 100) / 100);
 });
 
 test('sellShares reduces position and returns proceeds; basis is proportional', () => {
   const room = makeRoom(2);
   const seat = room.seats[0];
-  buyShares(seat, room.stocks, 'TPHT', 4); // basis = 200
+  const price = room.stocks.market.TPHT.price;
+  const buyCost = Math.round(price * 4 * 100) / 100;
+  buyShares(seat, room.stocks, 'TPHT', 4);
   const cashAfterBuy = seat.cash;
   const r = sellShares(seat, room.stocks, 'TPHT', 2);
   assert.equal(r.ok, true);
   assert.equal(seat.stockLots.TPHT, 2);
-  // Basis was 200 across 4 shares → selling 2 removes 100 → 100 remaining.
-  assert.equal(seat.stockCostBasis.TPHT, 100);
-  assert.equal(seat.cash, cashAfterBuy + STOCK_CATALOG.TPHT.start * 2);
+  // Selling half the position removes half the basis.
+  assert.equal(seat.stockCostBasis.TPHT, Math.round((buyCost / 2) * 100) / 100);
+  assert.equal(seat.cash, Math.round((cashAfterBuy + price * 2) * 100) / 100);
 });
 
 test('reducer buyStock action: only non-bankrupt seats can buy', () => {

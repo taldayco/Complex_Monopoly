@@ -5,7 +5,6 @@
   import MarketPanel from './MarketPanel.svelte';
   import LoansPanel from './LoansPanel.svelte';
   import CardsPanel from './CardsPanel.svelte';
-  import ActionsPanel from './ActionsPanel.svelte';
   import WirePanel from './WirePanel.svelte';
   import RequestsPanel from './RequestsPanel.svelte';
 
@@ -16,7 +15,6 @@
 
   const TABS = [
     { id: 'market', label: 'Market' },
-    { id: 'actions', label: 'Actions' },
     { id: 'cards', label: 'Cards' },
     { id: 'loans', label: 'Loans' },
     { id: 'wire', label: 'Wire' },
@@ -69,8 +67,6 @@
     <div class="body">
       {#if ui.reserveTab === 'market'}
         <MarketPanel state={gs} {mySeat} />
-      {:else if ui.reserveTab === 'actions'}
-        <ActionsPanel state={gs} {mySeat} />
       {:else if ui.reserveTab === 'cards'}
         <CardsPanel state={gs} {mySeat} />
       {:else if ui.reserveTab === 'loans'}

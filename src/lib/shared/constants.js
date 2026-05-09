@@ -25,6 +25,12 @@ export const TRANSACTION_LOG_CAP = 200;
 
 export const MORTGAGE_INTEREST = 0.1;
 
+// "Buy with Mortgage" — financing a property purchase over N installments at a
+// fixed per-turn interest rate. Distinct from MORTGAGE_INTEREST, which is the
+// premium for unmortgaging an already-owned property via the classic flow.
+export const BUY_MORTGAGE_PTR = 0.10;
+export const BUY_MORTGAGE_TERMS = [5, 10];
+
 export const RAILROAD_RENT = [25, 50, 100, 200];
 export const UTILITY_MULT = [4, 10];
 

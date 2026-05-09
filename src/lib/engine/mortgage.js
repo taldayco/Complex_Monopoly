@@ -47,3 +47,36 @@ export function unmortgage(state, seatIndex, spaceIndex) {
   seat.cash -= check.cost;
   return { ok: true, cost: check.cost };
 }
+
+// Sell an unmortgaged, house-free property back to the bank for its mortgage
+// value. The property returns to the unowned pool — the next player to land on
+// it can buy it at list price (same flow as a never-bought tile). A mortgaged
+// property must be unmortgaged first; an owner who can't afford that should
+// just keep it mortgaged.
+export function canSellPropertyToBank(state, seatIndex, spaceIndex) {
+  const space = BOARD[spaceIndex];
+  if (!space || !isOwnable(space)) return { ok: false, error: 'NOT_OWNABLE' };
+  const prop = state.properties[spaceIndex];
+  if (prop.ownerSeat !== seatIndex) return { ok: false, error: 'NOT_OWNER' };
+  if (prop.mortgaged) return { ok: false, error: 'IS_MORTGAGED' };
+  if (prop.houses > 0) return { ok: false, error: 'HAS_HOUSES' };
+  if (space.type === 'property') {
+    for (const i of COLOR_GROUPS[space.colorGroup] ?? []) {
+      if (state.properties[i].houses > 0) return { ok: false, error: 'GROUP_HAS_HOUSES' };
+    }
+  }
+  return { ok: true, payout: space.mortgageValue };
+}
+
+export function sellPropertyToBank(state, seatIndex, spaceIndex) {
+  const check = canSellPropertyToBank(state, seatIndex, spaceIndex);
+  if (!check.ok) return check;
+  const space = BOARD[spaceIndex];
+  const seat = state.seats[seatIndex];
+  const prop = state.properties[spaceIndex];
+  prop.ownerSeat = null;
+  prop.mortgaged = false;
+  prop.houses = 0;
+  seat.cash += space.mortgageValue;
+  return { ok: true, payout: space.mortgageValue };
+}

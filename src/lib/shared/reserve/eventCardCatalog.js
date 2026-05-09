@@ -20,6 +20,9 @@
 //   'tempEffect'        { effectId, turns, payload } — push a tempEffect entry
 //   'specialLoan'       { principal, term, ptr }     — instantly create a loan
 //   'bankPaysInstallment'                            — bank pays next due installment
+//   'revealWildcards'   { symbol }                   — privately reveal that
+//                                                       stock's wildcards to
+//                                                       the drawing seat only
 
 export const RESERVE_COMMUNITY_DECK = [
   {
@@ -150,6 +153,36 @@ export const RESERVE_CHANCE_DECK = [
     name: 'Promotional Fee Waiver',
     blurb: 'Card rotating fees halved for 5 turns.',
     effects: [{ kind: 'tempEffect', effectId: 'halfCardFees', turns: 5 }]
+  },
+  {
+    id: 'chance.insiderTipTPHT',
+    name: 'Insider Tip — TPHT',
+    blurb: 'A whisper from the trading floor reveals TPHT’s next two wildcards. Only you see it.',
+    effects: [{ kind: 'revealWildcards', symbol: 'TPHT' }]
+  },
+  {
+    id: 'chance.insiderTipMNCL',
+    name: 'Insider Tip — MNCL',
+    blurb: 'A whisper from the trading floor reveals MNCL’s next two wildcards. Only you see it.',
+    effects: [{ kind: 'revealWildcards', symbol: 'MNCL' }]
+  },
+  {
+    id: 'chance.insiderTipCANE',
+    name: 'Insider Tip — CANE',
+    blurb: 'A whisper from the trading floor reveals CANE’s next two wildcards. Only you see it.',
+    effects: [{ kind: 'revealWildcards', symbol: 'CANE' }]
+  },
+  {
+    id: 'chance.insiderTipRRRD',
+    name: 'Insider Tip — RRRD',
+    blurb: 'A whisper from the trading floor reveals RRRD’s next two wildcards. Only you see it.',
+    effects: [{ kind: 'revealWildcards', symbol: 'RRRD' }]
+  },
+  {
+    id: 'chance.insiderTipBORR',
+    name: 'Insider Tip — BORR',
+    blurb: 'A whisper from the trading floor reveals BORR’s next two wildcards. Only you see it.',
+    effects: [{ kind: 'revealWildcards', symbol: 'BORR' }]
   }
 ];
 

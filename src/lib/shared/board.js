@@ -9,7 +9,7 @@ export const BOARD = [
   { index: 2, name: 'Community Chest', type: 'communityChest' },
   { index: 3, name: 'Baltic Avenue', type: 'property', colorGroup: 'brown',
     price: 60, rent: [4, 20, 60, 180, 320, 450], houseCost: 50, mortgageValue: 30 },
-  { index: 4, name: 'Income Tax', type: 'tax', amount: 200 },
+  { index: 4, name: 'Market Open', type: 'marketOpen' },
   { index: 5, name: 'Reading Railroad', type: 'railroad',
     price: 200, mortgageValue: 100 },
   { index: 6, name: 'Oriental Avenue', type: 'property', colorGroup: 'lightblue',
@@ -37,7 +37,7 @@ export const BOARD = [
     price: 180, rent: [14, 70, 200, 550, 750, 950], houseCost: 100, mortgageValue: 90 },
   { index: 19, name: 'New York Avenue', type: 'property', colorGroup: 'orange',
     price: 200, rent: [16, 80, 220, 600, 800, 1000], houseCost: 100, mortgageValue: 100 },
-  { index: 20, name: 'Free Parking', type: 'freeParking' },
+  { index: 20, name: 'Market Open', type: 'marketOpen' },
   { index: 21, name: 'Kentucky Avenue', type: 'property', colorGroup: 'red',
     price: 220, rent: [18, 90, 250, 700, 875, 1050], houseCost: 150, mortgageValue: 110 },
   { index: 22, name: 'Chance', type: 'chance' },
@@ -68,7 +68,7 @@ export const BOARD = [
   { index: 36, name: 'Chance', type: 'chance' },
   { index: 37, name: 'Park Place', type: 'property', colorGroup: 'darkblue',
     price: 350, rent: [35, 175, 500, 1100, 1300, 1500], houseCost: 200, mortgageValue: 175 },
-  { index: 38, name: 'Luxury Tax', type: 'tax', amount: 75 },
+  { index: 38, name: 'Market Open', type: 'marketOpen' },
   { index: 39, name: 'Boardwalk', type: 'property', colorGroup: 'darkblue',
     price: 400, rent: [50, 200, 600, 1400, 1700, 2000], houseCost: 200, mortgageValue: 200 }
 ];

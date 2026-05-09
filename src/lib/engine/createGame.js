@@ -34,7 +34,7 @@ export function createInitialRoom({ code, hostPlayerToken, rngSeed }) {
     pendingAuctions: [],
     pendingRequests: [],
     pendingTransfers: [],
-    stocks: createStocksState(),
+    stocks: createStocksState(rngSeed),
     chance: { deck: shuffleIds(CHANCE_CARDS, rngSeed, 1), discard: [] },
     communityChest: { deck: shuffleIds(COMMUNITY_CHEST_CARDS, rngSeed, 2), discard: [] },
     reserveDecks: createReserveDeckState(rngSeed),
@@ -73,7 +73,8 @@ export function newSeat({ seat, playerToken, name, tokenPiece }) {
     loanTurnResponded: true,
     pendingLoanOffer: null,
     lastDrawnEventCard: null,
-    drewEventCardThisTurn: false
+    drewEventCardThisTurn: false,
+    revealedWildcards: {}
   };
 }
 
@@ -85,7 +86,10 @@ export function hydrateRoom(room) {
   if (!Array.isArray(room.pendingAuctions)) room.pendingAuctions = [];
   if (!Array.isArray(room.pendingRequests)) room.pendingRequests = [];
   if (!Array.isArray(room.pendingTransfers)) room.pendingTransfers = [];
-  room.stocks = hydrateStocks(room.stocks);
+  // A server crash mid Market Open leaves stale state and no timer to tick it
+  // forward. Clear so the next landing can re-trigger cleanly.
+  if (room.marketOpen !== undefined) room.marketOpen = null;
+  room.stocks = hydrateStocks(room.stocks, room.rngSeed ?? 0);
   hydrateReserveDecks(room);
   if (Array.isArray(room.seats)) {
     for (const s of room.seats) hydrateSeat(s);
@@ -110,6 +114,7 @@ function hydrateSeat(s) {
   if (s.pendingLoanOffer === undefined) s.pendingLoanOffer = null;
   if (s.lastDrawnEventCard === undefined) s.lastDrawnEventCard = null;
   if (typeof s.drewEventCardThisTurn !== 'boolean') s.drewEventCardThisTurn = false;
+  if (!s.revealedWildcards || typeof s.revealedWildcards !== 'object') s.revealedWildcards = {};
 }
 
 function makeInitialProperties() {

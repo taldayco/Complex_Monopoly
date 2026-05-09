@@ -8,11 +8,13 @@ export const C2S = {
   START_GAME: 'startGame',
   ROLL_DICE: 'rollDice',
   BUY_PROPERTY: 'buyProperty',
+  BUY_PROPERTY_WITH_MORTGAGE: 'buyPropertyWithMortgage',
   DECLINE_TO_BUY: 'declineToBuy',
   BID: 'bid',
   PASS_AUCTION: 'passAuction',
   MORTGAGE: 'mortgage',
   UNMORTGAGE: 'unmortgage',
+  SELL_PROPERTY_TO_BANK: 'sellPropertyToBank',
   BUY_HOUSE: 'buyHouse',
   SELL_HOUSE: 'sellHouse',
   PROPOSE_TRADE: 'proposeTrade',
@@ -45,7 +47,6 @@ export const C2S = {
 
   // Reserve: event cards
   BANKER_SEND_EVENT_CARD: 'bankerSendEventCard',
-  FLIP_EVENT_CARD: 'flipEventCard',
   EVENT_CARD_ACTION: 'eventCardAction',
   DISMISS_EVENT_CARD: 'dismissEventCard',
 

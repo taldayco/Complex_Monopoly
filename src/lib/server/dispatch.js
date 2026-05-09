@@ -10,7 +10,7 @@ import {
   setSeatConnection
 } from './roomManager.js';
 import { C2S, S2C } from '../shared/messageTypes.js';
-import { scheduleAuctionEnd, cancelAuctionEnd } from './auctionTimer.js';
+import { scheduleAuctionEnd, cancelAuctionEnd, scheduleTimer, cancelTimer } from './auctionTimer.js';
 
 // State for each connected socket: { roomCode, playerToken, seatIndex }
 const socketState = new WeakMap();
@@ -150,30 +150,27 @@ export function runServerAction(roomCode, action) {
 // in the same event batch overrides the cancel, which is correct.
 function processEventsForTimers(roomCode, events) {
   if (!events || events.length === 0) return;
-  let scheduled = false;
-  let cancelled = false;
+  let auctionScheduled = false;
+  let marketScheduled = false;
   for (const e of events) {
     if (e.type === 'auctionStart' && e.payload?.endsAtMs) {
       scheduleAuctionEnd(roomCode, e.payload.endsAtMs);
-      scheduled = true;
-      cancelled = false;
+      auctionScheduled = true;
     } else if (e.type === 'bid' && e.payload?.endsAtMs) {
       scheduleAuctionEnd(roomCode, e.payload.endsAtMs);
-      scheduled = true;
-      cancelled = false;
+      auctionScheduled = true;
     } else if (e.type === 'auctionEnd') {
-      if (!scheduled) {
-        cancelAuctionEnd();
-        cancelled = true;
-      } else {
-        // A later auctionStart in the same batch will rearm; keep current sched.
-        cancelled = false;
-      }
+      if (!auctionScheduled) cancelAuctionEnd();
+    } else if (e.type === 'marketOpenStart' && e.payload?.nextTickAtMs) {
+      scheduleTimer('market', roomCode, e.payload.nextTickAtMs);
+      marketScheduled = true;
+    } else if (e.type === 'marketTickScheduled' && e.payload?.nextTickAtMs) {
+      scheduleTimer('market', roomCode, e.payload.nextTickAtMs);
+      marketScheduled = true;
+    } else if (e.type === 'marketOpenEnd') {
+      if (!marketScheduled) cancelTimer('market');
     }
   }
-  // Reading 'cancelled' here is just for completeness; cancel/schedule already
-  // applied above.
-  void cancelled;
 }
 
 // ---- BROADCAST ----
@@ -183,10 +180,26 @@ function broadcastState(roomCode) {
   if (!room) return;
   const sockets = roomSockets.get(roomCode);
   if (!sockets) return;
-  const payload = JSON.stringify({ type: S2C.STATE, gameState: scrubState(room) });
-  for (const s of sockets) {
-    if (s.readyState === 1) s.send(payload);
+  // Snapshot to a fresh array so a mid-iteration close() that mutates the
+  // backing Set doesn't skip subsequent sockets. Try each send and prune
+  // anything that throws — readyState alone is unreliable in the Workers
+  // runtime, so attempt-then-recover instead of attempt-only-when-OPEN.
+  const dead = [];
+  for (const s of [...sockets]) {
+    const ss = socketState.get(s);
+    const viewerSeat = ss?.seatIndex ?? null;
+    try {
+      s.send(JSON.stringify({ type: S2C.STATE, gameState: scrubState(room, viewerSeat) }));
+    } catch (e) {
+      console.warn('broadcastState send failed', e?.message ?? e);
+      dead.push(s);
+    }
   }
+  for (const s of dead) {
+    sockets.delete(s);
+    socketState.delete(s);
+  }
+  if (sockets.size === 0) roomSockets.delete(roomCode);
 }
 
 function sendWelcome(socket, room, seat) {
@@ -195,23 +208,31 @@ function sendWelcome(socket, room, seat) {
     playerToken: seat.playerToken,
     seat: seat.seat,
     roomCode: room.code,
-    gameState: scrubState(room)
+    gameState: scrubState(room, seat.seat)
   }));
 }
 
 function sendError(socket, code, message) {
-  if (socket.readyState !== 1) return;
-  socket.send(JSON.stringify({ type: S2C.ERROR, code, message: message ?? code }));
+  try {
+    socket.send(JSON.stringify({ type: S2C.ERROR, code, message: message ?? code }));
+  } catch (e) {
+    console.warn('sendError failed', code, e?.message ?? e);
+  }
 }
 
-// Strip per-seat secret playerToken from the broadcasted state. Each client receives only
-// non-secret fields; their own token came in their welcome message.
-function scrubState(room) {
+// Strip per-seat secret playerToken from the broadcasted state. Each client
+// receives only non-secret fields; their own token came in their welcome
+// message. `viewerSeat` is the recipient's seat index — fields that are
+// private to a seat (e.g. revealedWildcards from insider-tip chance cards) are
+// only included on the matching seat and redacted from everyone else's view.
+function scrubState(room, viewerSeat) {
   const hostSeat = room.seats.find((s) => s.playerToken === room.hostPlayerToken)?.seat ?? null;
-  const { hostPlayerToken, rngSeed, rngCursor, reserveDecks, ...rest } = room;
+  const { hostPlayerToken, rngSeed, rngCursor, reserveDecks, stocks, marketOpen, ...rest } = room;
   return {
     ...rest,
     hostSeat,
+    stocks: scrubStocks(stocks),
+    marketOpen: scrubMarketOpen(marketOpen),
     reserveDecks: reserveDecks
       ? {
           community: {
@@ -224,40 +245,101 @@ function scrubState(room) {
           }
         }
       : null,
-    seats: room.seats.map((s) => ({
-      seat: s.seat,
-      name: s.name,
-      tokenPiece: s.tokenPiece,
-      connected: s.connected,
-      disconnectedAt: s.disconnectedAt,
-      cash: s.cash,
-      position: s.position,
-      inJail: s.inJail,
-      jailTurns: s.jailTurns,
-      getOutOfJailFreeChance: s.getOutOfJailFreeChance,
-      getOutOfJailFreeCommunity: s.getOutOfJailFreeCommunity,
-      bankrupt: s.bankrupt,
-      // Reserve fields — non-secret, all players see all players' finance state
-      baseScore: s.baseScore,
-      creditScore: s.creditScore,
-      loans: s.loans,
-      creditCards: s.creditCards,
-      stockLots: s.stockLots,
-      stockCostBasis: s.stockCostBasis,
-      transactions: s.transactions,
-      eventInventory: s.eventInventory,
-      tempEffects: s.tempEffects,
-      hysaRate: s.hysaRate,
-      loanTurnResponded: s.loanTurnResponded,
-      pendingLoanOffer: s.pendingLoanOffer ?? null,
-      lastDrawnEventCard: s.lastDrawnEventCard ?? null,
-      drewEventCardThisTurn: s.drewEventCardThisTurn ?? false
-    })),
+    seats: room.seats.map((s) => {
+      const isSelf = s.seat === viewerSeat;
+      return {
+        seat: s.seat,
+        name: s.name,
+        tokenPiece: s.tokenPiece,
+        connected: s.connected,
+        disconnectedAt: s.disconnectedAt,
+        cash: s.cash,
+        position: s.position,
+        inJail: s.inJail,
+        jailTurns: s.jailTurns,
+        getOutOfJailFreeChance: s.getOutOfJailFreeChance,
+        getOutOfJailFreeCommunity: s.getOutOfJailFreeCommunity,
+        bankrupt: s.bankrupt,
+        // Reserve fields — non-secret, all players see all players' finance state
+        baseScore: s.baseScore,
+        creditScore: s.creditScore,
+        loans: s.loans,
+        creditCards: s.creditCards,
+        stockLots: s.stockLots,
+        stockCostBasis: s.stockCostBasis,
+        transactions: s.transactions,
+        eventInventory: s.eventInventory,
+        tempEffects: s.tempEffects,
+        hysaRate: s.hysaRate,
+        loanTurnResponded: s.loanTurnResponded,
+        pendingLoanOffer: s.pendingLoanOffer ?? null,
+        lastDrawnEventCard: scrubLastDrawnEventCard(s.lastDrawnEventCard, isSelf),
+        drewEventCardThisTurn: s.drewEventCardThisTurn ?? false,
+        // Private to the owning seat: revealed wildcard values from insider tips.
+        revealedWildcards: isSelf ? (s.revealedWildcards ?? {}) : {}
+      };
+    }),
     chance: { deckSize: room.chance.deck.length, discardSize: room.chance.discard.length },
     communityChest: {
       deckSize: room.communityChest.deck.length,
       discardSize: room.communityChest.discard.length
     }
+  };
+}
+
+// Strip wildcard reveal payloads from other seats' lastDrawnEventCard entries
+// so non-owners can see the card was drawn (deck/cardId/blurb) but never the
+// revealed values. The owner's view is left untouched.
+function scrubLastDrawnEventCard(card, isSelf) {
+  if (!card) return null;
+  if (isSelf) return card;
+  const effects = Array.isArray(card?.results?.effects)
+    ? card.results.effects.map((eff) => {
+        if (eff?.kind !== 'revealWildcards') return eff;
+        const { wildCards, inDeck, ...redacted } = eff;
+        return redacted;
+      })
+    : card?.results?.effects;
+  return {
+    ...card,
+    results: card.results ? { ...card.results, effects } : card.results
+  };
+}
+
+// Strip the pre-rolled flip schedule from the broadcasted market-open state.
+// Clients see counters/timestamps so the modal can render countdown + tick
+// pacing, but never the future per-tick results (which would let them predict
+// price moves before they happen).
+function scrubMarketOpen(mo) {
+  if (!mo || typeof mo !== 'object') return mo ?? null;
+  const { scheduledFlips, ...rest } = mo;
+  return rest;
+}
+
+// Strip per-stock card-deck contents so clients can't peek the order. Replace
+// each stock's `deck: [{value, wild}, …]` with summary counts that the market
+// monitor can render. Prices, history, and last-flip pcts pass through.
+function scrubStocks(stocks) {
+  if (!stocks || typeof stocks !== 'object') return stocks ?? null;
+  const market = {};
+  if (stocks.market && typeof stocks.market === 'object') {
+    for (const [sym, m] of Object.entries(stocks.market)) {
+      const deck = Array.isArray(m?.deck) ? m.deck : [];
+      let wildsRemaining = 0;
+      for (const c of deck) if (c && c.wild) wildsRemaining += 1;
+      const { deck: _, ...rest } = m ?? {};
+      market[sym] = {
+        ...rest,
+        deckSize: deck.length,
+        wildsRemaining
+      };
+    }
+  }
+  return {
+    round: stocks.round ?? 0,
+    cycle: stocks.cycle ?? 0,
+    lastFlip: stocks.lastFlip ?? null,
+    market
   };
 }
 

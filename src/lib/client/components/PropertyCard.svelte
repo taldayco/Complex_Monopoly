@@ -45,8 +45,8 @@
         <tr><td>Mortgage</td><td>${space.mortgageValue}</td></tr>
         <tr><td>Price</td><td>${space.price}</td></tr>
       </tbody></table>
-    {:else if space.type === 'tax'}
-      <p>Pay ${space.amount}.</p>
+    {:else if space.type === 'marketOpen'}
+      <p>Landing here opens the market for 34 seconds. Every volatile stock draws one card per second; all players can buy and sell from the Market Monitor.</p>
     {:else}
       <p class="type-desc">{space.type}</p>
     {/if}

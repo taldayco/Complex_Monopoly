@@ -16,11 +16,10 @@
   const selectedMarket = $derived(market[selectedSymbol]);
   const selectedHistory = $derived(selectedMarket?.history ?? []);
   const selectedPrice = $derived(selectedMarket?.price ?? 0);
-  const isIndex = $derived(STOCK_CATALOG[selectedSymbol]?.type === 'index');
   const cost = $derived(Math.round(selectedPrice * qty * 100) / 100);
   const owned = $derived(lots[selectedSymbol] ?? 0);
-  const canBuy = $derived(!isIndex && me && me.cash >= cost && qty > 0);
-  const canSell = $derived(!isIndex && owned >= qty && qty > 0);
+  const canBuy = $derived(me && me.cash >= cost && qty > 0);
+  const canSell = $derived(owned >= qty && qty > 0);
 
   function buy() {
     if (!canBuy) return;
@@ -122,7 +121,6 @@
       {@const profit = pl(sym)}
       <tr
         class:selected={selectedSymbol === sym}
-        class:index={cat?.type === 'index'}
         onclick={() => (selectedSymbol = sym)}
       >
         <td><strong>{cat?.name ?? sym}</strong></td>
@@ -145,25 +143,21 @@
 
 <div class="trade">
   <h3>Trade {STOCK_CATALOG[selectedSymbol]?.name ?? selectedSymbol}</h3>
-  {#if isIndex}
-    <p class="ink-mute">F&amp;P500 is an index — track only, not directly tradeable.</p>
-  {:else}
-    <div class="row">
-      <label>
-        Qty
-        <input type="number" min="1" max="9999" bind:value={qty} />
-      </label>
-      <div class="cost">
-        <div>Price: <strong>${fmt(selectedPrice)}</strong></div>
-        <div>Cost: <strong>${fmt(cost)}</strong></div>
-        <div>Owned: <strong>{owned}</strong></div>
-      </div>
+  <div class="row">
+    <label>
+      Qty
+      <input type="number" min="1" max="9999" bind:value={qty} />
+    </label>
+    <div class="cost">
+      <div>Price: <strong>${fmt(selectedPrice)}</strong></div>
+      <div>Cost: <strong>${fmt(cost)}</strong></div>
+      <div>Owned: <strong>{owned}</strong></div>
     </div>
-    <div class="actions">
-      <button class="primary" onclick={buy} disabled={!canBuy}>Buy {qty} share{qty === 1 ? '' : 's'}</button>
-      <button onclick={sell} disabled={!canSell}>Sell {qty} share{qty === 1 ? '' : 's'}</button>
-    </div>
-  {/if}
+  </div>
+  <div class="actions">
+    <button class="primary" onclick={buy} disabled={!canBuy}>Buy {qty} share{qty === 1 ? '' : 's'}</button>
+    <button onclick={sell} disabled={!canSell}>Sell {qty} share{qty === 1 ? '' : 's'}</button>
+  </div>
 </div>
 
 {#if gs.stocks?.lastFlip}
@@ -209,7 +203,6 @@
   table.market tbody tr { cursor: pointer; }
   table.market tbody tr:hover { background: var(--bg); }
   table.market tbody tr.selected { background: rgba(46, 125, 50, 0.12); }
-  table.market tbody tr.index { color: var(--ink-mute); cursor: default; font-style: italic; }
   .up { color: var(--good, #2e7d32); }
   .down { color: var(--danger, #c62828); }
   .trade { padding-top: 0.6rem; border-top: 1px solid var(--panel-border); }

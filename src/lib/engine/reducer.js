@@ -7,15 +7,23 @@ import {
   MAX_DOUBLES,
   CHANCE_INDICES,
   COMMUNITY_CHEST_INDICES,
-  AUCTION_MIN_BID
+  AUCTION_MIN_BID,
+  BUY_MORTGAGE_PTR,
+  BUY_MORTGAGE_TERMS
 } from '../shared/constants.js';
 import { advancePosition, moveTo, rollDice as rollDiceFn } from './movement.js';
 import { computeRent } from './rent.js';
-import { canBuy, buyProperty as buyPropertyFn } from './purchase.js';
+import { canBuy, buyProperty as buyPropertyFn, transferOwnership } from './purchase.js';
 import { sendToJail, attemptJailExit } from './jail.js';
 import { drawCard, returnCardToDiscard } from './cards.js';
 import { canBuyHouse, buyHouse as buyHouseFn, canSellHouse, sellHouse as sellHouseFn } from './building.js';
-import { canMortgage, mortgage as mortgageFn, canUnmortgage, unmortgage as unmortgageFn } from './mortgage.js';
+import {
+  canMortgage,
+  mortgage as mortgageFn,
+  canUnmortgage,
+  unmortgage as unmortgageFn,
+  sellPropertyToBank as sellPropertyToBankFn
+} from './mortgage.js';
 import { validateTrade, executeTrade } from './trade.js';
 import {
   createAuction,
@@ -30,6 +38,7 @@ import {
   sellShares
 } from './reserve/stocks.js';
 import { AUTO_FLIP_EVERY_N_TURNS } from '../shared/reserve/stockCatalog.js';
+import { getTierByScore } from '../shared/reserve/loanCatalog.js';
 import {
   rollLoanDie,
   requestLoanOffer,
@@ -58,6 +67,11 @@ import {
   cancelTransferRequest
 } from './reserve/transfers.js';
 import { applyHysaInterestAtTurnStart } from './reserve/hysa.js';
+import {
+  startMarketOpen,
+  applyMarketOpenTick,
+  MARKET_OPEN_ALLOWED_ACTIONS
+} from './reserve/marketOpen.js';
 import {
   liquidateBuildings,
   transferToCreditor,
@@ -100,12 +114,20 @@ export function reducer(state, action, ctx) {
 }
 
 function dispatch(state, action, ctx, log) {
+  // While a Market Open window is active, block every non-trading action.
+  // Buy/sell stocks and trades stay open; the server-injected tick passes
+  // through to advance the window.
+  if (state.marketOpen?.active && !MARKET_OPEN_ALLOWED_ACTIONS.has(action.type)) {
+    return { error: 'MARKET_OPEN_ACTIVE' };
+  }
   switch (action.type) {
     case 'rollDice':         return doRollDice(state, action, ctx, log);
     case 'buyProperty':      return doBuyProperty(state, action, ctx, log);
+    case 'buyPropertyWithMortgage': return doBuyPropertyWithMortgage(state, action, ctx, log);
     case 'declineToBuy':     return doDeclineToBuy(state, action, ctx, log);
     case 'bid':              return doBid(state, action, ctx, log);
     case 'auctionTick':      return doAuctionTick(state, action, ctx, log);
+    case 'marketOpenTick':   return doMarketOpenTick(state, action, ctx, log);
     case 'buyStock':         return doBuyStock(state, action, ctx, log);
     case 'sellStock':        return doSellStock(state, action, ctx, log);
     case 'requestLoan':      return doRequestLoan(state, action, ctx, log);
@@ -115,7 +137,6 @@ function dispatch(state, action, ctx, log) {
     case 'payoffLoan':       return doPayoffLoan(state, action, ctx, log);
     case 'requestCreditCard': return doRequestCreditCard(state, action, ctx, log);
     case 'cancelCreditCard': return doCancelCreditCard(state, action, ctx, log);
-    case 'flipEventCard':    return doFlipEventCard(state, action, ctx, log);
     case 'dismissEventCard': return doDismissEventCard(state, action, ctx, log);
     case 'wireTransfer':     return doWireAction(state, action, ctx, log);
     case 'requestTransfer':  return doRequestTransferAction(state, action, ctx, log);
@@ -123,6 +144,7 @@ function dispatch(state, action, ctx, log) {
     case 'cancelTransfer':   return doCancelTransferAction(state, action, ctx, log);
     case 'mortgage':         return doMortgage(state, action, ctx, log);
     case 'unmortgage':       return doUnmortgage(state, action, ctx, log);
+    case 'sellPropertyToBank': return doSellPropertyToBank(state, action, ctx, log);
     case 'buyHouse':         return doBuyHouse(state, action, ctx, log);
     case 'sellHouse':        return doSellHouse(state, action, ctx, log);
     case 'proposeTrade':     return doProposeTrade(state, action, ctx, log);
@@ -140,6 +162,22 @@ function dispatch(state, action, ctx, log) {
 
 function isCurrentSeat(state, action) {
   return action.seat === state.turn.seat;
+}
+
+// When a stock's deck reshuffles, its wildcards are re-randomized. Any
+// insider-tip reveals on the prior wildcards are now stale and must be
+// dropped from every seat that knew them. The reveal is symbol-scoped, so
+// reveals for un-reshuffled stocks are left intact.
+function clearStaleWildcardReveals(state, reshuffledSymbols) {
+  if (!Array.isArray(reshuffledSymbols) || reshuffledSymbols.length === 0) return;
+  if (!Array.isArray(state.seats)) return;
+  for (const sym of reshuffledSymbols) {
+    for (const s of state.seats) {
+      if (s?.revealedWildcards && s.revealedWildcards[sym] !== undefined) {
+        delete s.revealedWildcards[sym];
+      }
+    }
+  }
 }
 
 // ---------- ROLL DICE ----------
@@ -198,8 +236,23 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
       return;
 
     case 'tax': {
+      // Retained as defensive dead code: the classic Income/Luxury Tax tiles
+      // are now `marketOpen`, but a future board variant could reintroduce
+      // tax tiles and this arm stays correct.
       const amount = space.amount;
       tryDebit(state, seatIndex, amount, { type: 'tax', name: space.name }, log);
+      return;
+    }
+
+    case 'marketOpen': {
+      const mo = startMarketOpen(state, seatIndex, ctx, seat.position);
+      log('marketOpenStart', seatIndex, {
+        spaceIndex: seat.position,
+        totalTicks: mo.totalTicks,
+        startedAtMs: mo.startedAtMs,
+        endsAtMs: mo.endsAtMs,
+        nextTickAtMs: mo.nextTickAtMs
+      });
       return;
     }
 
@@ -207,6 +260,7 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
       const { card, id } = drawCard(state, 'chance', ctx.rng);
       log('drawCard', seatIndex, { deck: 'chance', id, text: card.text });
       applyCardEffect(state, seatIndex, ctx, log, card, id, 'chance', opts.diceTotal);
+      autoDrawReserveCard(state, seatIndex, 'chance', ctx, log);
       return;
     }
 
@@ -214,6 +268,7 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
       const { card, id } = drawCard(state, 'communityChest', ctx.rng);
       log('drawCard', seatIndex, { deck: 'communityChest', id, text: card.text });
       applyCardEffect(state, seatIndex, ctx, log, card, id, 'communityChest', opts.diceTotal);
+      autoDrawReserveCard(state, seatIndex, 'community', ctx, log);
       return;
     }
 
@@ -456,6 +511,64 @@ function doDeclineToBuy(state, action, ctx, log) {
   return {};
 }
 
+// Finance the property purchase as a 5- or 10-installment mortgage at fixed
+// 10% per-turn interest. Property transfers immediately; the debt rides on
+// the existing loan plumbing as a `seat.loans[]` entry tagged source: 'mortgage'.
+function doBuyPropertyWithMortgage(state, action, ctx, log) {
+  const pa = state.pendingAction;
+  if (!pa || pa.type !== 'buyDecision') return { error: 'NO_BUY_DECISION' };
+  if (pa.seat !== action.seat) return { error: 'NOT_YOUR_DECISION' };
+  if (typeof action.spaceIndex === 'number' && action.spaceIndex !== pa.spaceIndex) {
+    return { error: 'SPACE_MISMATCH' };
+  }
+  const term = action.term;
+  if (!BUY_MORTGAGE_TERMS.includes(term)) return { error: 'BAD_TERM' };
+  const seat = state.seats[action.seat];
+  if (seat.bankrupt) return { error: 'BANKRUPT' };
+  if (getTierByScore(seat.creditScore ?? 0).name === 'Poor') {
+    return { error: 'NOT_ELIGIBLE' };
+  }
+
+  const result = transferOwnership(state, action.seat, pa.spaceIndex);
+  if (!result.ok) return { error: result.error };
+  const { price } = result;
+
+  const principal = price;
+  const ptr = BUY_MORTGAGE_PTR;
+  const totalDebt = Math.round(principal * (1 + ptr * term) * 100) / 100;
+  const installment = Math.round((totalDebt / term) * 100) / 100;
+  const loan = {
+    id: `M-${seat.seat}-${seat.loans.length}-${Date.now()}`,
+    principal,
+    term,
+    ptr,
+    totalDebt,
+    installment,
+    paymentsMade: 0,
+    balance: totalDebt,
+    takenAt: Date.now(),
+    dueThisTurn: false,
+    status: 'active',
+    source: 'mortgage',
+    propertyIndex: pa.spaceIndex,
+    propertyName: BOARD[pa.spaceIndex].name
+  };
+  seat.loans.push(loan);
+
+  log('buyWithMortgage', action.seat, {
+    spaceIndex: pa.spaceIndex,
+    price,
+    term,
+    ptr,
+    totalDebt,
+    installment,
+    loanId: loan.id
+  });
+  state.pendingAction = null;
+  recomputePhase(state);
+  return {};
+}
+
 // ---------- AUCTION ----------
 // Free-for-all bidding. Any non-bankrupt seat may bid; each accepted bid resets
 // the timer. Settled by `doAuctionTick` (server-injected on timer expiry) or
@@ -509,6 +622,14 @@ function doUnmortgage(state, action, ctx, log) {
   const r = unmortgageFn(state, action.seat, action.spaceIndex);
   if (!r.ok) return { error: r.error };
   log('unmortgage', action.seat, { spaceIndex: action.spaceIndex, cost: r.cost });
+  return {};
+}
+
+function doSellPropertyToBank(state, action, ctx, log) {
+  const r = sellPropertyToBankFn(state, action.seat, action.spaceIndex);
+  if (!r.ok) return { error: r.error };
+  log('sellPropertyToBank', action.seat, { spaceIndex: action.spaceIndex, payout: r.payout });
+  tryAutoSettle(state, log);
   return {};
 }
 
@@ -713,6 +834,7 @@ function continueEndTurnFlow(state, ctx, log) {
     if (state.stocks.cycle % AUTO_FLIP_EVERY_N_TURNS === 0) {
       const results = flipMarket(state.stocks, ctx.rng);
       state.rngCursor++;
+      clearStaleWildcardReveals(state, results.__reshuffled);
       log('marketFlip', null, { results, source: 'auto' });
     }
   }
@@ -875,25 +997,22 @@ function doCancelCreditCard(state, action, ctx, log) {
 }
 
 // ---------- EVENT CARDS ----------
-function doFlipEventCard(state, action, ctx, log) {
-  const seat = state.seats[action.seat];
-  if (!seat || seat.bankrupt) return { error: 'BANKRUPT' };
-  const deckName = action.deck;
-  if (deckName !== 'community' && deckName !== 'chance') return { error: 'BAD_DECK' };
-  if (seat.drewEventCardThisTurn) return { error: 'ALREADY_DREW' };
-  if (state.turn.seat !== action.seat) return { error: 'NOT_YOUR_TURN' };
-  if (state.turn.phase !== 'preRoll' && state.turn.phase !== 'endable') {
-    return { error: 'BAD_PHASE' };
-  }
+// Auto-draw a reserve event card for the seat. Called from applySpaceEffect
+// when a player lands on a chance / community-chest space. Idempotent within a
+// turn — the once-per-turn flag (also used by the legacy code path) prevents a
+// second auto-draw when doubles re-land on a card space. Silently no-ops on
+// bankruptcy or empty decks; failures are logged but never block the landing.
+function autoDrawReserveCard(state, seatIndex, deckName, ctx, log) {
+  const seat = state.seats[seatIndex];
+  if (!seat || seat.bankrupt) return;
+  if (seat.drewEventCardThisTurn) return;
+  if (deckName !== 'community' && deckName !== 'chance') return;
   const cardId = drawReserveCard(state, deckName, ctx.rng);
   state.rngCursor++;
-  if (!cardId) return { error: 'EMPTY_DECK' };
-  const r = applyEventCard(state, action.seat, deckName, cardId, ctx, log);
-  if (!r.ok) {
-    discardReserveCard(state, deckName, cardId);
-    return { error: r.error };
-  }
+  if (!cardId) return;
+  const r = applyEventCard(state, seatIndex, deckName, cardId, ctx, log);
   discardReserveCard(state, deckName, cardId);
+  if (!r.ok) return;
   seat.lastDrawnEventCard = {
     cardId,
     deck: deckName,
@@ -901,12 +1020,11 @@ function doFlipEventCard(state, action, ctx, log) {
     results: r.results
   };
   seat.drewEventCardThisTurn = true;
-  log('eventCardDrawn', action.seat, {
+  log('eventCardDrawn', seatIndex, {
     cardId,
     deck: deckName,
     effects: r.results.effects
   });
-  return {};
 }
 
 function doDismissEventCard(state, action, ctx, log) {
@@ -914,6 +1032,28 @@ function doDismissEventCard(state, action, ctx, log) {
   if (!seat) return { error: 'NO_SEAT' };
   if (!seat.lastDrawnEventCard) return { error: 'NO_CARD' };
   seat.lastDrawnEventCard = null;
+  return {};
+}
+
+// Server-injected tick driving the Market Open window. Each tick applies the
+// next pre-rolled flip frame to the live stocks, decrements the remaining
+// counter, and either schedules the next tick or closes the window.
+function doMarketOpenTick(state, action, ctx, log) {
+  if (!action._server) return { error: 'NOT_AUTHORIZED' };
+  if (!state.marketOpen?.active) return { error: 'NO_MARKET_OPEN' };
+  const tickIndex = state.marketOpen.ticksFired;
+  const r = applyMarketOpenTick(state);
+  if (r.error) return { error: r.error };
+  log('marketOpenTick', null, {
+    tickIndex,
+    results: r.results ?? null,
+    done: !!r.done
+  });
+  if (r.done) {
+    log('marketOpenEnd', null, null);
+  } else {
+    log('marketTickScheduled', null, { nextTickAtMs: r.nextTickAtMs });
+  }
   return {};
 }
 

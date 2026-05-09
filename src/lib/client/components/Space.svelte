@@ -21,13 +21,11 @@
     {:else if space.type === 'jail'}
       <div class="sub">Jail</div>
       <div class="sub">Just Visiting</div>
-    {:else if space.type === 'freeParking'}
-      <div class="sub">Free Parking</div>
+    {:else if space.type === 'marketOpen'}
+      <div class="big">$</div>
+      <div class="sub">Market Open</div>
     {:else if space.type === 'goToJail'}
       <div class="sub">Go To Jail</div>
-    {:else if space.type === 'tax'}
-      <div class="name">{space.name}</div>
-      <div class="price">Pay ${space.amount}</div>
     {:else if space.type === 'chance'}
       <div class="big">?</div>
       <div class="sub">Chance</div>
@@ -98,11 +96,10 @@
   .big { font-size: 1.6rem; font-weight: bold; font-family: 'Georgia', serif; color: var(--accent); }
   .type-go { background: #ffd180; }
   .type-jail { background: #ffab91; }
-  .type-freeParking { background: #ffe0b2; }
+  .type-marketOpen { background: #c8e6c9; }
   .type-goToJail { background: #ef9a9a; }
   .type-chance { background: #fff3e0; }
   .type-communityChest { background: #e3f2fd; }
-  .type-tax { background: #e0e0e0; }
   .owner-ribbon {
     position: absolute;
     bottom: 0;

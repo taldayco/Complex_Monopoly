@@ -112,11 +112,10 @@ test('end turn with doubles allows another roll', () => {
 test('passing GO collects $200', () => {
   let s = makeRoom(2);
   s.seats[0].position = 38;
-  const rng = () => 0.34; // 3 + 3 = doubles, total 6 → wraps to 4 (Income Tax)
+  const rng = () => 0.34; // 3 + 3 = doubles, total 6 → wraps to 4 (Market Open)
   s = step(s, { type: 'rollDice', seat: 0 }, { rng });
-  // Landed on Income Tax: -200, but +200 from passing GO → net 0
-  // Actually: position 38 + 6 = 44, mod 40 = 4. passedGo=true (since 38+6 >= 40).
-  // Cash: 1500 + 200 (GO) - 200 (tax) = 1500.
+  // Position 38 + 6 = 44, mod 40 = 4. passedGo=true (since 38+6 >= 40).
+  // Tile 4 is now Market Open (no tax debit), so cash: 1500 + 200 (GO) = 1700.
   assert.equal(s.seats[0].position, 4);
-  assert.equal(s.seats[0].cash, 1500);
+  assert.equal(s.seats[0].cash, 1700);
 });

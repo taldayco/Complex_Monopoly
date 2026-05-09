@@ -1,26 +1,36 @@
 import { initRooms, setPersistence } from './roomManager.js';
 import { handleMessage, handleConnect, handleDisconnect, runServerAction } from './dispatch.js';
 import { filePersistence } from './persistence.js';
-import { setAuctionTimer } from './auctionTimer.js';
+import { setTimerImpl } from './auctionTimer.js';
 
 let initialized = false;
-let nodeAuctionTimer = null;
+const nodeTimers = new Map(); // kind -> { handle, roomCode }
 
-function installNodeAuctionTimer() {
-  setAuctionTimer({
-    schedule(roomCode, endsAtMs) {
-      if (nodeAuctionTimer) clearTimeout(nodeAuctionTimer);
-      const delay = Math.max(0, endsAtMs - Date.now());
-      nodeAuctionTimer = setTimeout(() => {
-        nodeAuctionTimer = null;
-        runServerAction(roomCode, { type: 'auctionTick', _server: true });
+const KIND_TO_ACTION = {
+  auction: 'auctionTick',
+  market: 'marketOpenTick'
+};
+
+function installNodeTimers() {
+  setTimerImpl({
+    schedule(kind, roomCode, fireAtMs) {
+      const existing = nodeTimers.get(kind);
+      if (existing?.handle) clearTimeout(existing.handle);
+      const delay = Math.max(0, fireAtMs - Date.now());
+      const handle = setTimeout(() => {
+        nodeTimers.delete(kind);
+        const actionType = KIND_TO_ACTION[kind];
+        if (!actionType) return;
+        runServerAction(roomCode, { type: actionType, _server: true });
       }, delay);
-      // Don't keep the event loop alive solely for an auction timer.
-      nodeAuctionTimer?.unref?.();
+      // Don't keep the event loop alive solely for a game timer.
+      handle?.unref?.();
+      nodeTimers.set(kind, { handle, roomCode });
     },
-    cancel() {
-      if (nodeAuctionTimer) clearTimeout(nodeAuctionTimer);
-      nodeAuctionTimer = null;
+    cancel(kind) {
+      const existing = nodeTimers.get(kind);
+      if (existing?.handle) clearTimeout(existing.handle);
+      nodeTimers.delete(kind);
     }
   });
 }
@@ -29,7 +39,7 @@ export async function attachGameServer(wss) {
   if (!initialized) {
     initialized = true;
     setPersistence(filePersistence);
-    installNodeAuctionTimer();
+    installNodeTimers();
     await initRooms();
   }
   wss.on('connection', (socket) => {

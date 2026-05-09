@@ -17,10 +17,10 @@ function step(state, action, ctx = { rng: makeRng() }) {
 
 // ---------- decks initialise ----------
 
-test('createInitialRoom populates reserveDecks with 10 + 10 cards', () => {
+test('createInitialRoom populates reserveDecks with 10 + 15 cards', () => {
   const s = makeRoom(2);
   assert.equal(s.reserveDecks.community.deck.length, 10);
-  assert.equal(s.reserveDecks.chance.deck.length, 10);
+  assert.equal(s.reserveDecks.chance.deck.length, 15);
 });
 
 // ---------- direct effect application ----------
@@ -96,40 +96,69 @@ test('applyEventCard cmty.bankPaysInstallment pays installment on existing loan'
   assert.equal(loan.dueThisTurn, false);
 });
 
-// ---------- reducer flow ----------
+// ---------- auto-draw on board landing ----------
 
-test('flipEventCard: rejects when not your turn', () => {
-  const s = makeRoom(2);
-  s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
-  const r = reducer(s, { type: 'flipEventCard', seat: 1, deck: 'community' }, { rng: makeRng() });
-  assert.equal(r.ok, false);
-  assert.equal(r.error, 'NOT_YOUR_TURN');
-});
+// Position a seat just behind a target space and roll dice using a fixed
+// total. We set a deterministic rng that returns predictable doubles-free
+// values: rollDice consumes two rng() calls. With our LCG, seed=1 yields
+// d1=4, d2=2 first call set — but to keep this test independent of LCG
+// internals, we monkey-patch ctx.rng to return values that produce d1+d2=8
+// and not-doubles.
+function rngForTotal(d1Target, d2Target) {
+  let i = 0;
+  return () => {
+    const v = i === 0 ? (d1Target - 0.5) / 6 : (d2Target - 0.5) / 6;
+    i++;
+    return v;
+  };
+}
 
-test('flipEventCard: enforces once-per-turn limit', () => {
+test('landing on Chance auto-draws a reserve event card and sets the flag', () => {
   let s = makeRoom(2);
+  s.seats[0].cash = 5000;
+  s.seats[0].position = 0;          // GO
   s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
-  s = step(s, { type: 'flipEventCard', seat: 0, deck: 'community' });
-  const r = reducer(s, { type: 'flipEventCard', seat: 0, deck: 'community' }, { rng: makeRng() });
-  assert.equal(r.ok, false);
-  assert.equal(r.error, 'ALREADY_DREW');
-});
-
-test('flipEventCard: stores lastDrawnEventCard, reduces deck size by 1', () => {
-  let s = makeRoom(2);
-  s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
-  const beforeDeck = s.reserveDecks.community.deck.length;
-  s = step(s, { type: 'flipEventCard', seat: 0, deck: 'community' });
-  assert.equal(s.reserveDecks.community.deck.length, beforeDeck - 1);
-  assert.equal(s.reserveDecks.community.discard.length, 1);
-  assert.ok(s.seats[0].lastDrawnEventCard);
+  const beforeDeck = s.reserveDecks.chance.deck.length;
+  // Roll d1=4, d2=3 → total 7 → land on Chance (index 7).
+  s = step(s, { type: 'rollDice', seat: 0 }, { rng: rngForTotal(4, 3) });
+  assert.equal(s.seats[0].position, 7);
+  assert.equal(s.reserveDecks.chance.deck.length, beforeDeck - 1);
+  assert.equal(s.reserveDecks.chance.discard.length, 1);
+  assert.ok(s.seats[0].lastDrawnEventCard, 'lastDrawnEventCard populated');
+  assert.equal(s.seats[0].lastDrawnEventCard.deck, 'chance');
   assert.equal(s.seats[0].drewEventCardThisTurn, true);
 });
 
-test('dismissEventCard: clears lastDrawnEventCard', () => {
+test('landing on Community Chest auto-draws from the reserve community deck', () => {
   let s = makeRoom(2);
+  s.seats[0].cash = 5000;
+  s.seats[0].position = 0;          // GO
   s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
-  s = step(s, { type: 'flipEventCard', seat: 0, deck: 'community' });
+  const beforeDeck = s.reserveDecks.community.deck.length;
+  // Roll d1=1, d2=1 → total 2 → land on Community Chest (index 2). Doubles.
+  s = step(s, { type: 'rollDice', seat: 0 }, { rng: rngForTotal(1, 1) });
+  assert.equal(s.seats[0].position, 2);
+  assert.equal(s.reserveDecks.community.deck.length, beforeDeck - 1);
+  assert.ok(s.seats[0].lastDrawnEventCard);
+  assert.equal(s.seats[0].lastDrawnEventCard.deck, 'community');
+  assert.equal(s.seats[0].drewEventCardThisTurn, true);
+});
+
+test('flipEventCard action is no longer accepted (manual draw removed)', () => {
+  const s = makeRoom(2);
+  s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
+  const r = reducer(s, { type: 'flipEventCard', seat: 0, deck: 'community' }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'UNKNOWN_ACTION');
+});
+
+test('dismissEventCard: clears lastDrawnEventCard after auto-draw', () => {
+  let s = makeRoom(2);
+  s.seats[0].cash = 5000;
+  s.seats[0].position = 0;
+  s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
+  s = step(s, { type: 'rollDice', seat: 0 }, { rng: rngForTotal(4, 3) });
+  assert.ok(s.seats[0].lastDrawnEventCard);
   s = step(s, { type: 'dismissEventCard', seat: 0 });
   assert.equal(s.seats[0].lastDrawnEventCard, null);
 });

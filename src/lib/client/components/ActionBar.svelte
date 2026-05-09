@@ -1,7 +1,8 @@
 <script>
   import { send } from '$lib/client/socket.js';
   import { BOARD, isOwnable } from '$lib/shared/board.js';
-  import { COLOR_GROUPS } from '$lib/shared/constants.js';
+  import { COLOR_GROUPS, BUY_MORTGAGE_PTR, BUY_MORTGAGE_TERMS } from '$lib/shared/constants.js';
+  import { getTierByScore } from '$lib/shared/reserve/loanCatalog.js';
   import { ui, openReserve } from '$lib/client/stores.svelte.js';
 
   let { state, me, isMyTurn } = $props();
@@ -27,6 +28,26 @@
   function rollForJail() { send({ type: 'rollForJail' }); }
   function payJailFine() { send({ type: 'payJailFine' }); }
   function useJailCard() { send({ type: 'useGetOutOfJail' }); }
+
+  let mortgageTerm = $state(BUY_MORTGAGE_TERMS[0]);
+  function buyWithMortgage() {
+    send({
+      type: 'buyPropertyWithMortgage',
+      term: mortgageTerm,
+      spaceIndex: pending?.spaceIndex
+    });
+  }
+  const mortgageEligible = $derived(
+    me ? getTierByScore(me.creditScore ?? 0).name !== 'Poor' : false
+  );
+  const mortgageQuote = $derived.by(() => {
+    if (!pending || pending.type !== 'buyDecision') return null;
+    const principal = pending.price;
+    const term = mortgageTerm;
+    const totalDebt = Math.round(principal * (1 + BUY_MORTGAGE_PTR * term) * 100) / 100;
+    const installment = Math.round((totalDebt / term) * 100) / 100;
+    return { principal, term, totalDebt, installment };
+  });
 
   const canBuyDecision = $derived(
     pending?.type === 'buyDecision' && pending.seat === me?.seat
@@ -77,6 +98,33 @@
         </button>
         <button onclick={decline}>Decline → Auction</button>
       </div>
+      <div class="mortgage-section">
+        <div class="mortgage-label">Buy with Mortgage @ 10%/turn</div>
+        <div class="term-pills">
+          {#each BUY_MORTGAGE_TERMS as t (t)}
+            <button
+              class="term-pill"
+              class:active={mortgageTerm === t}
+              onclick={() => (mortgageTerm = t)}
+              disabled={!mortgageEligible}
+            >{t} turns</button>
+          {/each}
+        </div>
+        {#if mortgageQuote}
+          <div class="quote">
+            ${mortgageQuote.installment}/turn × {mortgageQuote.term}
+            (total ${mortgageQuote.totalDebt})
+          </div>
+        {/if}
+        <button
+          class="primary"
+          onclick={buyWithMortgage}
+          disabled={!mortgageEligible}
+          title={mortgageEligible ? '' : 'Credit tier too low (Poor) — needs 580+'}
+        >
+          Mortgage {mortgageQuote ? `($${mortgageQuote.installment}/turn × ${mortgageQuote.term})` : ''}
+        </button>
+      </div>
     </div>
   {/if}
 
@@ -87,7 +135,7 @@
 
   <div class="reserve-grid">
     <button onclick={() => openReserve('market')}>Market</button>
-    <button onclick={() => openReserve('actions')}>Actions</button>
+    <button onclick={() => (ui.showPropertiesModal = true)}>Properties</button>
     <button onclick={() => openReserve('cards')}>Cards</button>
     <button onclick={() => openReserve('loans')}>Loans</button>
     <button onclick={() => openReserve('wire')}>Wire</button>
@@ -154,6 +202,41 @@
     border: 1px solid var(--warn);
     padding: 0.5rem;
     border-radius: 4px;
+  }
+  .mortgage-section {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .mortgage-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink-mute);
+  }
+  .term-pills { display: flex; gap: 0.3rem; }
+  .term-pill {
+    flex: 1;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.8rem;
+    border: 1px solid var(--panel-border);
+    background: var(--panel);
+    color: inherit;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .term-pill.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .term-pill[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .quote {
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: var(--ink-mute);
   }
   .row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.4rem; }
   .main-row button { flex: 1; }

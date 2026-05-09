@@ -66,17 +66,16 @@ test('endTurn: HYSA interest applied to the new active seat', () => {
   assert.equal(s.seats[1].cash, 1050);
 });
 
-test('endTurn: HYSA interest paid before card rotating fee', () => {
+test('endTurn: HYSA card bonus stacks with base rate at turn start', () => {
   let s = makeRoom(2);
   s.seats[1].cash = 100;
   s.seats[1].hysaRate = HYSA_BASE_RATE;
-  // Add readingRail (rotatingFee 5, hysaBonus 0.01).
+  // Add readingRail (hysaBonus 0.01).
   s.seats[1].creditCards.push({
     id: 'CC-rr', cardId: 'readingRail', status: 'active', acquiredAt: 0
   });
   s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
   s = step(s, { type: 'endTurn', seat: 0 });
   // Interest: 100 * (0.05 + 0.01) = 6 → cash 106
-  // Then rotating fee: 106 - 5 = 101
-  assert.equal(s.seats[1].cash, 101);
+  assert.equal(s.seats[1].cash, 106);
 });

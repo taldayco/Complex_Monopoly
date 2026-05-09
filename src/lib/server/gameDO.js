@@ -1,30 +1,44 @@
 import { initRooms, setPersistence } from './roomManager.js';
 import { handleMessage, handleConnect, handleDisconnect, runServerAction } from './dispatch.js';
 import { createDOPersistence } from './doPersistence.js';
-import { setAuctionTimer } from './auctionTimer.js';
+import { setTimerImpl } from './auctionTimer.js';
 
-const ACTIVE_AUCTION_KEY = 'activeAuctionRoomCode';
+const PENDING_TIMERS_KEY = 'pendingTimers';
+
+const KIND_TO_ACTION = {
+  auction: 'auctionTick',
+  market: 'marketOpenTick'
+};
 
 // Single Durable Object instance (singleton via idFromName('default')) that
 // owns every room. WebSockets attach here; messages flow through the same
-// dispatcher used by the Node server. Auction expiry runs via the DO's
-// `alarm()` method — only one auction-timer slot exists at a time, which is
-// fine because at most one room can have a live auction window in flight per
-// DO process.
+// dispatcher used by the Node server.
+//
+// Timers: the DO has only one pending alarm slot, so we multiplex multiple
+// timer kinds (auction window expiry, market-open per-second ticks) by storing
+// `{ auction?: {roomCode, fireAtMs}, market?: {roomCode, fireAtMs} }` under
+// PENDING_TIMERS_KEY. `schedule` updates the map and re-arms the alarm to the
+// soonest fireAtMs. `alarm()` reads the map, fires every entry whose fireAtMs
+// is due, removes it, and re-arms to the next earliest if any remain.
 export class GameDO {
   constructor(state, env) {
     this.state = state;
     this.env = env;
     this.ready = state.blockConcurrencyWhile(async () => {
       setPersistence(createDOPersistence(state.storage));
-      setAuctionTimer({
-        async schedule(roomCode, endsAtMs) {
-          await state.storage.put(ACTIVE_AUCTION_KEY, roomCode);
-          await state.storage.setAlarm(endsAtMs);
+      setTimerImpl({
+        schedule: async (kind, roomCode, fireAtMs) => {
+          const map = (await state.storage.get(PENDING_TIMERS_KEY)) ?? {};
+          map[kind] = { roomCode, fireAtMs };
+          await state.storage.put(PENDING_TIMERS_KEY, map);
+          await rearmAlarm(state.storage, map);
         },
-        async cancel() {
-          await state.storage.delete(ACTIVE_AUCTION_KEY);
-          await state.storage.deleteAlarm();
+        cancel: async (kind) => {
+          const map = (await state.storage.get(PENDING_TIMERS_KEY)) ?? {};
+          if (!(kind in map)) return;
+          delete map[kind];
+          await state.storage.put(PENDING_TIMERS_KEY, map);
+          await rearmAlarm(state.storage, map);
         }
       });
       await initRooms();
@@ -49,9 +63,24 @@ export class GameDO {
 
   async alarm() {
     await this.ready;
-    const roomCode = await this.state.storage.get(ACTIVE_AUCTION_KEY);
-    if (!roomCode) return;
-    runServerAction(roomCode, { type: 'auctionTick', _server: true });
+    const map = (await this.state.storage.get(PENDING_TIMERS_KEY)) ?? {};
+    const now = Date.now();
+    const due = [];
+    for (const [kind, entry] of Object.entries(map)) {
+      if (entry?.fireAtMs != null && entry.fireAtMs <= now) {
+        due.push({ kind, roomCode: entry.roomCode });
+        delete map[kind];
+      }
+    }
+    if (due.length > 0) {
+      await this.state.storage.put(PENDING_TIMERS_KEY, map);
+    }
+    for (const { kind, roomCode } of due) {
+      const actionType = KIND_TO_ACTION[kind];
+      if (!actionType) continue;
+      runServerAction(roomCode, { type: actionType, _server: true });
+    }
+    await rearmAlarm(this.state.storage, map);
   }
 
   attachSocket(ws) {
@@ -79,4 +108,15 @@ export class GameDO {
       console.warn('socket error', e?.message ?? e);
     });
   }
+}
+
+async function rearmAlarm(storage, map) {
+  const times = Object.values(map)
+    .map((e) => e?.fireAtMs)
+    .filter((t) => typeof t === 'number');
+  if (times.length === 0) {
+    await storage.deleteAlarm();
+    return;
+  }
+  await storage.setAlarm(Math.min(...times));
 }

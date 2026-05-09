@@ -22,7 +22,9 @@ export const ui = $state({
   tradeTarget: null,
   showProperties: false,
   showReserve: false,
-  reserveTab: 'market' // 'market' | 'loans' | 'cards' | 'actions' | 'wire' | 'requests'
+  reserveTab: 'market', // 'market' | 'loans' | 'cards' | 'wire' | 'requests'
+  showPropertiesModal: false,
+  showMarketMonitor: false
 });
 
 export function openReserve(tab = 'market') {

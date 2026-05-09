@@ -2,10 +2,10 @@
 // shuffled card decks; one F&P500 index that tracks the average price of the
 // volatile stocks.
 //
-// Each volatile stock starts with the same `BASE_CARDS` distribution (32 cards
-// totalling +0 percent in expectation) plus two stock-specific `wildCards`
-// that shift its long-run drift. Wild cards are mixed into the deck on each
-// reshuffle.
+// Each volatile stock's deck is the same `BASE_CARDS` distribution (32 cards
+// totalling +0 percent in expectation) plus two wildcards drawn at random
+// from `WILDCARD_POOL` on every (re)shuffle. The per-stock `wildCards` field
+// below is unused at runtime — kept only as a descriptive default.
 
 export const VOLATILE_STOCK_ORDER = ['TPHT', 'MNCL', 'CANE', 'RRRD', 'BORR'];
 export const FP500_SYMBOL = 'FP500';
@@ -22,6 +22,13 @@ export const BASE_CARDS = [
   50, 50, -50, -50,
   100, -100
 ];
+
+// Pool of possible wildcard values. On each (re)shuffle of a volatile stock's
+// deck, two wildcards are picked at random (with replacement) from this pool
+// and mixed into the 32 base cards. The per-stock `wildCards` field below is
+// vestigial — kept only as a starting hint; runtime ignores it in favor of
+// random selection from this pool.
+export const WILDCARD_POOL = [-100, -50, -25, 25, 50, 100];
 
 // Per-stock characteristics (starting price, shares outstanding, wild cards).
 // `wildCards` are the long-run-bias cards that get mixed into the deck on

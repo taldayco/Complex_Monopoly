@@ -113,6 +113,11 @@
           <li class="loan" class:due={loan.dueThisTurn}>
             <div class="loan-head">
               <span class="balance">${fmt(loan.balance)}</span>
+              {#if loan.source === 'mortgage'}
+                <span class="mortgage-tag" title="Property mortgage">
+                  🏠 {loan.propertyName ?? `Space ${loan.propertyIndex}`}
+                </span>
+              {/if}
               <span class="meta">
                 {loan.paymentsMade}/{loan.term} paid · {fmtPct(loan.ptr)}/turn
               </span>
@@ -220,6 +225,14 @@
   .loan-head { display: flex; align-items: center; gap: 0.6rem; }
   .loan-head .balance { font-family: monospace; font-size: 1.1rem; font-weight: 600; }
   .loan-head .meta { color: var(--ink-mute); font-size: 0.78rem; flex: 1; }
+  .mortgage-tag {
+    font-size: 0.72rem;
+    padding: 0.1rem 0.4rem;
+    background: var(--panel-border);
+    border-radius: 4px;
+    color: var(--ink-mute);
+    white-space: nowrap;
+  }
   .due-badge {
     background: var(--warn, #ed6c02);
     color: #fff;

@@ -54,7 +54,7 @@
             <li>
               <div class="head">
                 <strong>{card.name}</strong>
-                <span class="fee">${fmt(card.rotatingFee)}/turn</span>
+                <span class="fee">{Math.round((card.interestRate ?? 0) * 100)}% / 4t</span>
               </div>
               <p class="blurb">{card.blurb}</p>
               <button onclick={() => cancel(inst.id)} disabled={(me?.cash ?? 0) < card.cancelFee}>
@@ -82,14 +82,22 @@
             <strong>{card.name}</strong>
             <span class="tier-tag">{card.requiredTier}+</span>
           </header>
+          {#if card.bank}
+            <p class="bank">{card.bank}</p>
+          {/if}
           <p class="blurb">{card.blurb}</p>
           <ul class="fees">
             <li>Sign: <strong>${fmt(card.signingFee)}</strong></li>
-            <li>Turn: <strong>${fmt(card.rotatingFee)}</strong></li>
+            <li>GO: <strong>${fmt(card.goFee ?? 0)}</strong></li>
             <li>Cancel: <strong>${fmt(card.cancelFee)}</strong></li>
             {#if card.signupBonus > 0}
               <li class="bonus">Bonus: <strong>+${fmt(card.signupBonus)}</strong></li>
             {/if}
+          </ul>
+          <ul class="fees">
+            <li>Line: <strong>${fmt(card.minLine ?? 0)}</strong></li>
+            <li>APR: <strong>{Math.round((card.interestRate ?? 0) * 100)}%/4t</strong></li>
+            <li>Min Pay: <strong>${fmt(card.minPayment ?? 0)}</strong></li>
           </ul>
           {#if ownedCardIds.has(cid)}
             <span class="status-tag owned-tag">Owned</span>
@@ -149,6 +157,7 @@
     font-size: 0.65rem;
     letter-spacing: 0.04em;
   }
+  .card .bank { font-size: 0.7rem; color: var(--ink-mute); margin: 0; font-style: italic; letter-spacing: 0.02em; }
   .card .blurb { font-size: 0.78rem; color: var(--ink-mute); margin: 0; min-height: 2.4em; }
   .card .fees { list-style: none; padding: 0; margin: 0; font-size: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .card .fees li.bonus { color: var(--good, #2e7d32); }

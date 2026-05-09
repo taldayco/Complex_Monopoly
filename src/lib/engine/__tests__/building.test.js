@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canBuyHouse, buyHouse, sellHouse } from '../building.js';
+import { canSellPropertyToBank, sellPropertyToBank } from '../mortgage.js';
 import { makeRoom, giveProperty } from './helpers.js';
 
 test('cannot build without monopoly', () => {
@@ -92,4 +93,53 @@ test('insufficient bank houses blocks building', () => {
   const r = canBuyHouse(room, 0, 1);
   assert.equal(r.ok, false);
   assert.equal(r.error, 'NO_HOUSES');
+});
+
+// ---------- sellPropertyToBank ----------
+
+test('sellPropertyToBank: refunds mortgage value, returns property to bank', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 1);                       // Mediterranean (mortgageValue 30)
+  const before = room.seats[0].cash;
+  const r = sellPropertyToBank(room, 0, 1);
+  assert.equal(r.ok, true);
+  assert.equal(r.payout, 30);
+  assert.equal(room.seats[0].cash, before + 30);
+  assert.equal(room.properties[1].ownerSeat, null);
+  assert.equal(room.properties[1].mortgaged, false);
+  assert.equal(room.properties[1].houses, 0);
+});
+
+test('sellPropertyToBank: rejects mortgaged property', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 1, { mortgaged: true });
+  const r = canSellPropertyToBank(room, 0, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'IS_MORTGAGED');
+});
+
+test('sellPropertyToBank: rejects when property has houses', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 1, { houses: 1 });
+  giveProperty(room, 0, 3);
+  const r = canSellPropertyToBank(room, 0, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'HAS_HOUSES');
+});
+
+test('sellPropertyToBank: rejects when group has houses on a sibling tile', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 1);                         // empty Mediterranean
+  giveProperty(room, 0, 3, { houses: 2 });          // Baltic with houses
+  const r = canSellPropertyToBank(room, 0, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'GROUP_HAS_HOUSES');
+});
+
+test('sellPropertyToBank: rejects non-owner', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 1);
+  const r = canSellPropertyToBank(room, 1, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'NOT_OWNER');
 });
