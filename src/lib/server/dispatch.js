@@ -89,7 +89,15 @@ function handleStartGame(socket, msg) {
   const ss = socketState.get(socket);
   if (!ss) return sendError(socket, 'NOT_AUTHED');
   const result = startGame(ss.roomCode, ss.playerToken);
-  if (result.error) return sendError(socket, result.error);
+  if (result.error) {
+    sendError(socket, result.error);
+    // Catch a stale client up: if the room has already started, the host's
+    // UI is on the lobby because they missed an earlier broadcast. Push the
+    // current state directly so they navigate forward instead of being stuck
+    // hammering Start Game.
+    if (result.error === 'ALREADY_STARTED') sendStateTo(socket, ss.roomCode);
+    return;
+  }
   broadcastState(ss.roomCode);
 }
 
@@ -210,6 +218,21 @@ function sendWelcome(socket, room, seat) {
     roomCode: room.code,
     gameState: scrubState(room, seat.seat)
   }));
+}
+
+// Push the current room state to a single socket. Used as a re-sync safety
+// net when a client's action fails because it's stale (e.g. clicking Start
+// Game when the room already started).
+function sendStateTo(socket, roomCode) {
+  const room = getRoom(roomCode);
+  if (!room) return;
+  const ss = socketState.get(socket);
+  const viewerSeat = ss?.seatIndex ?? null;
+  try {
+    socket.send(JSON.stringify({ type: S2C.STATE, gameState: scrubState(room, viewerSeat) }));
+  } catch (e) {
+    console.warn('sendStateTo failed', e?.message ?? e);
+  }
 }
 
 function sendError(socket, code, message) {
@@ -346,6 +369,13 @@ function scrubStocks(stocks) {
 // ---- SOCKET BOOKKEEPING ----
 
 function registerSocket(socket, roomCode, playerToken, seatIndex) {
+  // If this socket was previously registered to a different room (or seat),
+  // pull it out of the old room's socket set first so broadcasts to the old
+  // room don't keep targeting it.
+  const prev = socketState.get(socket);
+  if (prev && prev.roomCode !== roomCode) {
+    removeSocketFromRoom(prev.roomCode, socket);
+  }
   socketState.set(socket, { roomCode, playerToken, seatIndex });
   if (!roomSockets.has(roomCode)) roomSockets.set(roomCode, new Set());
   roomSockets.get(roomCode).add(socket);
