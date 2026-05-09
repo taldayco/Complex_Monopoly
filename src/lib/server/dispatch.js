@@ -88,6 +88,13 @@ function handleLeaveRoom(socket, msg) {
 function handleStartGame(socket, msg) {
   const ss = socketState.get(socket);
   if (!ss) return sendError(socket, 'NOT_AUTHED');
+  // Defensively make sure the requester is in the room's broadcast Set.
+  // Earlier auth/welcome broadcasts may have been pruned by overzealous
+  // cleanup in older builds.
+  if (!roomSockets.get(ss.roomCode)?.has(socket)) {
+    if (!roomSockets.has(ss.roomCode)) roomSockets.set(ss.roomCode, new Set());
+    roomSockets.get(ss.roomCode).add(socket);
+  }
   const result = startGame(ss.roomCode, ss.playerToken);
   if (result.error) {
     sendError(socket, result.error);
@@ -98,6 +105,10 @@ function handleStartGame(socket, msg) {
     if (result.error === 'ALREADY_STARTED') sendStateTo(socket, ss.roomCode);
     return;
   }
+  // Belt-and-suspenders: send state directly to the requester first, then
+  // broadcast to everyone (including them). The direct send guarantees the
+  // host navigates even if the broadcast loop drops them for any reason.
+  sendStateTo(socket, ss.roomCode);
   broadcastState(ss.roomCode);
 }
 
@@ -189,25 +200,20 @@ function broadcastState(roomCode) {
   const sockets = roomSockets.get(roomCode);
   if (!sockets) return;
   // Snapshot to a fresh array so a mid-iteration close() that mutates the
-  // backing Set doesn't skip subsequent sockets. Try each send and prune
-  // anything that throws — readyState alone is unreliable in the Workers
-  // runtime, so attempt-then-recover instead of attempt-only-when-OPEN.
-  const dead = [];
+  // backing Set doesn't skip subsequent sockets. Try each send; log on
+  // failure but DO NOT prune from the Set — a transient send error (e.g. a
+  // momentarily-stalled buffer in workerd) shouldn't permanently sideline a
+  // live socket. Real disconnects are cleaned up by handleDisconnect on the
+  // close event.
   for (const s of [...sockets]) {
     const ss = socketState.get(s);
     const viewerSeat = ss?.seatIndex ?? null;
     try {
       s.send(JSON.stringify({ type: S2C.STATE, gameState: scrubState(room, viewerSeat) }));
     } catch (e) {
-      console.warn('broadcastState send failed', e?.message ?? e);
-      dead.push(s);
+      console.warn('broadcastState send failed', ss?.playerToken?.slice?.(0, 8), e?.message ?? e);
     }
   }
-  for (const s of dead) {
-    sockets.delete(s);
-    socketState.delete(s);
-  }
-  if (sockets.size === 0) roomSockets.delete(roomCode);
 }
 
 function sendWelcome(socket, room, seat) {
