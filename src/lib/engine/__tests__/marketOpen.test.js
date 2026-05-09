@@ -4,7 +4,8 @@ import { reducer } from '../reducer.js';
 import { makeRoom, makeRng } from './helpers.js';
 import {
   MARKET_OPEN_TOTAL_TICKS,
-  MARKET_OPEN_TICK_INTERVAL_MS
+  MARKET_OPEN_TICK_INTERVAL_MS,
+  startMarketOpen
 } from '../reserve/marketOpen.js';
 import { VOLATILE_STOCK_ORDER } from '../../shared/reserve/stockCatalog.js';
 
@@ -133,4 +134,100 @@ test('Market Open emits start, tick, scheduled, and end events', () => {
   assert.equal(r.ok, true);
   assert.ok(r.events.find((e) => e.type === 'marketOpenEnd'));
   assert.equal(r.state.marketOpen, null);
+});
+
+test('Market Open scheduledFlips are deterministic for the same rngSeed', () => {
+  // Pre-rolling exists specifically so the market window is replayable from
+  // the seeded stream. Two rooms built with the same rngSeed (makeRoom hardcodes
+  // rngSeed: 1) and triggered identically must produce byte-equal frames.
+  const a = landOnMarketOpen(38, 4);
+  const b = landOnMarketOpen(38, 4);
+  assert.deepEqual(a.marketOpen.scheduledFlips, b.marketOpen.scheduledFlips);
+});
+
+test('startMarketOpen bumps rngCursor by exactly MARKET_OPEN_TOTAL_TICKS', () => {
+  // The auto-flip path advances rngCursor by 1 per flip; Market Open pre-rolls
+  // 34 flips at trigger time and must consume 34 cursor units in lockstep so
+  // the two paths share one seeded stream without desyncing.
+  const s = makeRoom(2);
+  const before = s.rngCursor ?? 0;
+  startMarketOpen(s, 0, { rng: makeRng() }, 4);
+  assert.equal((s.rngCursor ?? 0) - before, MARKET_OPEN_TOTAL_TICKS);
+});
+
+test('startMarketOpen does NOT mutate live stocks (only ticks do)', () => {
+  // The whole reason precomputeFlips works on a structuredClone shadow: the
+  // player should see prices change *as* the window ticks, not jump instantly
+  // when they land on the tile. Snapshot live state, trigger, assert no drift.
+  const s = makeRoom(2);
+  const before = Object.fromEntries(
+    VOLATILE_STOCK_ORDER.map((sym) => [sym, {
+      price: s.stocks.market[sym].price,
+      deckLen: s.stocks.market[sym].deck.length,
+      historyLen: s.stocks.market[sym].history.length
+    }])
+  );
+  startMarketOpen(s, 0, { rng: makeRng() }, 4);
+  for (const sym of VOLATILE_STOCK_ORDER) {
+    assert.equal(s.stocks.market[sym].price, before[sym].price, `${sym} price moved at trigger`);
+    assert.equal(s.stocks.market[sym].deck.length, before[sym].deckLen, `${sym} deck mutated at trigger`);
+    assert.equal(s.stocks.market[sym].history.length, before[sym].historyLen, `${sym} history grew at trigger`);
+  }
+});
+
+test('marketOpenTick applies scheduledFlips frame exactly to live stocks', () => {
+  // Frame fidelity: tick N must copy scheduledFlips[N].pricesAfter onto live
+  // m.price, push exactly one history entry equal to the new price, and set
+  // m.lastCard / m.lastFlipPct to the frame's results value for that symbol.
+  let s = landOnMarketOpen(38, 4);
+  const planned = s.marketOpen.scheduledFlips[0];
+  const histBefore = Object.fromEntries(
+    VOLATILE_STOCK_ORDER.map((sym) => [sym, s.stocks.market[sym].history.length])
+  );
+  s = step(s, { type: 'marketOpenTick', _server: true });
+  for (const sym of VOLATILE_STOCK_ORDER) {
+    const m = s.stocks.market[sym];
+    assert.equal(m.price, planned.pricesAfter[sym], `${sym} price != planned`);
+    assert.equal(m.history.length, histBefore[sym] + 1, `${sym} history did not grow by 1`);
+    assert.equal(m.history.at(-1), planned.pricesAfter[sym], `${sym} history tail != new price`);
+    if (typeof planned.results[sym] === 'number') {
+      assert.equal(m.lastCard, planned.results[sym], `${sym} lastCard != frame result`);
+      assert.equal(m.lastFlipPct, planned.results[sym], `${sym} lastFlipPct != frame result`);
+    }
+  }
+});
+
+test('reshuffles during Market Open clear revealedWildcards on affected stocks only', () => {
+  // When a stock's deck reshuffles mid-window, any insider-tip wildcard reveals
+  // on that symbol become stale and must be wiped from every seat. Symbols not
+  // reshuffled this tick must keep their reveals untouched.
+  let s = landOnMarketOpen(38, 4);
+  s.seats[0].revealedWildcards = Object.fromEntries(
+    VOLATILE_STOCK_ORDER.map((sym) => [sym, [{ value: 25, position: 0 }]])
+  );
+  let sawReshuffle = false;
+  for (let i = 0; i < MARKET_OPEN_TOTAL_TICKS; i++) {
+    const frame = s.marketOpen.scheduledFlips[i];
+    const reshuffledThisTick = new Set(frame.reshuffled ?? []);
+    const survivors = VOLATILE_STOCK_ORDER.filter(
+      (sym) => !reshuffledThisTick.has(sym) && s.seats[0].revealedWildcards[sym] !== undefined
+    );
+    s = step(s, { type: 'marketOpenTick', _server: true });
+    if (reshuffledThisTick.size > 0) {
+      sawReshuffle = true;
+      for (const sym of reshuffledThisTick) {
+        assert.equal(
+          s.seats[0].revealedWildcards[sym], undefined,
+          `${sym} revealedWildcards should be cleared after reshuffle on tick ${i}`
+        );
+      }
+      for (const sym of survivors) {
+        assert.notEqual(
+          s.seats[0].revealedWildcards[sym], undefined,
+          `${sym} revealedWildcards should NOT be cleared on tick ${i} (not reshuffled)`
+        );
+      }
+    }
+  }
+  assert.ok(sawReshuffle, 'expected at least one reshuffle across 34 ticks (decks are 34 cards)');
 });
