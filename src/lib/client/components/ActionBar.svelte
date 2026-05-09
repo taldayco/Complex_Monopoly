@@ -5,16 +5,20 @@
   import { getTierByScore } from '$lib/shared/reserve/loanCatalog.js';
   import { ui, openReserve } from '$lib/client/stores.svelte.js';
 
-  let { state, me, isMyTurn } = $props();
+  // Alias the `state` prop to `gs` locally — having a variable literally
+  // named `state` in scope makes the Svelte 5 compiler treat the `$state`
+  // rune in this same file as auto-subscribing to that prop, producing
+  // `n.subscribe is not a function` at mount.
+  let { state: gs, me, isMyTurn } = $props();
 
-  const turnPhase = $derived(state.turn?.phase);
-  const pending = $derived(state.pendingAction);
+  const turnPhase = $derived(gs.turn?.phase);
+  const pending = $derived(gs.pendingAction);
 
   const myMonopolies = $derived.by(() => {
     if (!me) return [];
     const groups = [];
     for (const [g, indices] of Object.entries(COLOR_GROUPS)) {
-      if (indices.every((i) => state.properties[i]?.ownerSeat === me.seat)) {
+      if (indices.every((i) => gs.properties[i]?.ownerSeat === me.seat)) {
         groups.push(g);
       }
     }
@@ -70,13 +74,13 @@
 <div class="action-bar">
   <div class="phase-label">
     {#if !isMyTurn}
-      Waiting for {state.seats[state.turn.seat]?.name}…
+      Waiting for {gs.seats[gs.turn.seat]?.name}…
     {:else if pending?.type === 'auction'}
       Auction in progress
     {:else if pending?.type === 'settleDebt' && pending.debtorSeat === me?.seat}
       You owe ${pending.amount}. Liquidate or declare bankruptcy.
     {:else if pending?.type === 'settleDebt'}
-      Waiting for {state.seats[pending.debtorSeat]?.name} to settle…
+      Waiting for {gs.seats[pending.debtorSeat]?.name} to settle…
     {:else if me?.inJail && turnPhase === 'preRoll'}
       You are in jail.
     {:else if loanBlocked}
@@ -156,7 +160,7 @@
     <details class="builds">
       <summary>Build / Mortgage</summary>
       <div class="manage-grid">
-        {#each Object.entries(state.properties) as [iStr, p] (iStr)}
+        {#each Object.entries(gs.properties) as [iStr, p] (iStr)}
           {#if p.ownerSeat === me?.seat}
             {@const i = Number(iStr)}
             {@const sp = BOARD[i]}

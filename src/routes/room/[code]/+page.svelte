@@ -10,8 +10,7 @@
   import Finished from '$lib/client/components/Finished.svelte';
 
   // $app/state's page is a runes-reactive object — no $-prefix subscription
-  // needed (and using the Svelte 4 $page store inside $derived in Svelte 5
-  // throws "n.subscribe is not a function" once mount races with reactivity).
+  // needed. Preferred over $app/stores in Svelte 5.
   const roomCode = $derived(page.params.code.toUpperCase());
   let noSession = $state(false);
 
