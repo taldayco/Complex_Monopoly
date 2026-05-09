@@ -1,5 +1,6 @@
 <script>
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { connect, send } from '$lib/client/socket.js';
   import { conn, session, game } from '$lib/client/stores.svelte.js';
@@ -8,27 +9,53 @@
   import GameUI from '$lib/client/components/GameUI.svelte';
   import Finished from '$lib/client/components/Finished.svelte';
 
-  const roomCode = $derived($page.params.code.toUpperCase());
+  // $app/state's page is a runes-reactive object — no $-prefix subscription
+  // needed (and using the Svelte 4 $page store inside $derived in Svelte 5
+  // throws "n.subscribe is not a function" once mount races with reactivity).
+  const roomCode = $derived(page.params.code.toUpperCase());
+  let noSession = $state(false);
 
   onMount(() => {
-    const s = loadSession(roomCode);
-    if (s) {
-      session.roomCode = s.roomCode;
-      session.playerToken = s.playerToken;
-      session.seat = s.seat;
+    // Check both sessionStorage (this tab) and localStorage (any prior tab)
+    // for a saved identity in this room. If the session.roomCode in memory
+    // is already set for this room (e.g. just came from createRoom/joinRoom
+    // on the landing page), use that — saveSession may not have run yet.
+    let s = loadSession(roomCode);
+    if (!s && session.roomCode === roomCode && session.playerToken) {
+      s = { roomCode, playerToken: session.playerToken, seat: session.seat };
     }
+    if (!s) {
+      // No identity for this room. The server has no way to recognize this
+      // client — sitting on the page would just spin "Connecting…" forever.
+      // Send them home so they can join.
+      noSession = true;
+      return;
+    }
+    session.roomCode = s.roomCode;
+    session.playerToken = s.playerToken;
+    session.seat = s.seat;
     connect();
-    if (s) {
-      send({ type: 'auth', roomCode: s.roomCode, playerToken: s.playerToken });
-    }
+    send({ type: 'auth', roomCode: s.roomCode, playerToken: s.playerToken });
   });
+
+  // Expose for browser-console debugging: open DevTools, type
+  //   __monopoly.game.state
+  // to see the live state without poking at module internals.
+  if (typeof window !== 'undefined') {
+    window.__monopoly = { game, session, conn };
+  }
 </script>
 
 {#if game.myError}
   <div class="error-toast">{game.myError}</div>
 {/if}
 
-{#if !game.state}
+{#if noSession}
+  <div class="loading">
+    <p>You're not in room <strong>{roomCode}</strong> on this browser.</p>
+    <button class="primary" onclick={() => goto('/')}>Go to home to join</button>
+  </div>
+{:else if !game.state}
   <div class="loading">
     {#if conn.status === 'open'}
       Connecting to room {roomCode}…

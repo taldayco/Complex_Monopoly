@@ -6,6 +6,16 @@ let ws = null;
 let outbox = [];
 let reconnectTimer = null;
 
+// Frame-level WebSocket logging. Off by default to keep the console clean.
+// In DevTools console, enable with:
+//   __monopoly.debug = true
+// Then every incoming/outgoing frame and reactivity transition is logged.
+function dbg(...args) {
+  if (typeof window !== 'undefined' && window.__monopoly?.debug) {
+    console.log('[ws]', ...args);
+  }
+}
+
 export function connect() {
   if (typeof window === 'undefined') return;
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -49,8 +59,10 @@ function scheduleReconnect() {
 
 export function send(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) {
+    dbg('▶', msg.type, msg);
     ws.send(JSON.stringify(msg));
   } else {
+    dbg('⏸ outbox', msg.type, msg);
     outbox.push(msg);
     connect();
   }
@@ -63,6 +75,7 @@ function flushOutbox() {
 }
 
 function handleServerMessage(msg) {
+  dbg('◀', msg.type, msg.type === 'state' ? `phase=${msg.gameState?.phase}` : msg);
   switch (msg.type) {
     case S2C.WELCOME:
       session.roomCode = msg.roomCode;

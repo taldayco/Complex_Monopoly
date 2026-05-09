@@ -192,6 +192,43 @@ try {
   );
   check('safety-net STATE arrived after ALREADY_STARTED', !!stateAfterErr);
 
+  // 7. Simulate a browser REFRESH: close the host's WS, open a new one,
+  //    re-auth with the saved playerToken. This mirrors what the browser does
+  //    when the user reloads /room/X. The new socket must receive the
+  //    current state via WELCOME and/or STATE.
+  console.log('\n--- simulating browser refresh: close+reauth host ---');
+  hostInbox.silence();
+  host.close();
+  await sleep(500);
+  const host2 = await open('HOST2');
+  const host2Inbox = instrument(host2, 'HOST2');
+  send(host2, { type: 'auth', roomCode, playerToken: welcome.playerToken }, 'HOST2');
+  try {
+    const w2 = await wait(host2Inbox, (m) => m.type === 'welcome', 3000);
+    check('refreshed host received WELCOME', true,
+      `phase=${w2.gameState?.phase} seat=${w2.seat}`);
+    check('refreshed host welcome carries phase=playing',
+      w2.gameState?.phase === 'playing',
+      `got phase=${w2.gameState?.phase}`);
+  } catch (e) {
+    check('refreshed host received WELCOME', false, e.message);
+  }
+  host2Inbox.silence();
+  host2.close();
+
+  // 8. Simulate a NEW BROWSER opening /room/X with NO saved session. This
+  //    is informational: the server has no way to identify the client, so
+  //    no welcome/state should arrive. The /room/[code] page handles this
+  //    by detecting no-session and redirecting to home.
+  console.log('\n--- info: fresh browser opening /room/X with NO session ---');
+  const stranger = await open('NEW ');
+  const strangerInbox = instrument(stranger, 'NEW ');
+  await sleep(800);
+  const got = strangerInbox.find((m) => m.type === 'welcome' || m.type === 'state');
+  console.log(`  ${got ? '?' : 'i'} unauth client received ${got ? 'a frame (unexpected!)' : 'nothing (expected — client must auth)'}`);
+  strangerInbox.silence();
+  stranger.close();
+
   console.log(`\n${pass ? '✓ ALL CHECKS PASSED' : '✗ FAILURES'}`);
 } catch (e) {
   console.error('\nFATAL', e);
