@@ -41,6 +41,78 @@ test('primed prices are positive and respect the $0.01 floor', () => {
   assert.ok(s.market[FP500_SYMBOL].price >= 0.01);
 });
 
+test('regression: stocks do NOT crash to $0.01 across seeds — multiplicative bug fix', () => {
+  // The original bug: multiplicative `price * (1 + pct/100)` math meant the
+  // -100 BASE card multiplied price by 0, dropping it to the $0.01 floor
+  // permanently. Every primed stock ended at $0.01-ish. With additive-against-
+  // start math, even floor hits recover (subsequent positive cards add an
+  // absolute dollar amount, not a multiple of current). Sample a bunch of seeds
+  // and assert the geometric mean is well above the floor.
+  const samples = [];
+  for (let seed = 1; seed <= 30; seed++) {
+    const s = createStocksState(seed);
+    for (const sym of VOLATILE_STOCK_ORDER) {
+      samples.push(s.market[sym].price / s.market[sym].startPrice);
+    }
+  }
+  const aboveDollar = samples.filter((r) => r > 0.05).length;
+  // With multiplicative math + the -100 card, virtually all samples crashed to
+  // <2% of start. With additive math, the vast majority should be well above.
+  assert.ok(
+    aboveDollar / samples.length > 0.9,
+    `expected >90% of samples above 5% of start, got ${aboveDollar}/${samples.length}`
+  );
+});
+
+test('expected value of primed price ≈ start × 1.15 (BASE deck sum + zero-mean wildcards)', () => {
+  // The deck sum is BASE_SUM (+15) + wildcards drawn from a zero-mean pool.
+  // Across enough seeds, the mean primed price should approach start * 1.15.
+  // Additive math + floor clamp introduces a small upward bias (clamp absorbs
+  // negative tails), so allow generous tolerance.
+  const N = 80;
+  const ratios = [];
+  for (let seed = 1; seed <= N; seed++) {
+    const s = createStocksState(seed);
+    for (const sym of VOLATILE_STOCK_ORDER) {
+      ratios.push(s.market[sym].price / s.market[sym].startPrice);
+    }
+  }
+  const mean = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+  // Center is +15%; clamp adds a bit of upward bias. Should be in [0.9, 2.0].
+  assert.ok(mean > 0.9, `mean ratio ${mean.toFixed(2)} too low — bug may not be fixed`);
+  assert.ok(mean < 2.0, `mean ratio ${mean.toFixed(2)} suspiciously high`);
+});
+
+test('with wildcards forced to sum to 0 and no -100 base hits, final = start × 1.15 exactly', () => {
+  // Use a controlled deck order where the running sum × startPrice never
+  // dips below zero, so no clamping happens and the additive invariant is
+  // exact: final = start × (1 + sum/100) = start × 1.15.
+  const s = createStocksState(0, { primeHistory: false });
+  for (const sym of VOLATILE_STOCK_ORDER) {
+    const m = s.market[sym];
+    // Sort cards from largest positive to most negative — keeps the running
+    // total above zero so the floor-clamp never kicks in.
+    const baseCards = m.deck
+      .filter((c) => !c.wild)
+      .slice()
+      .sort((a, b) => b.value - a.value);
+    m.deck = [
+      ...baseCards,
+      { value: 25, wild: true },
+      { value: -25, wild: true }
+    ];
+  }
+  primeStockHistory(s);
+  for (const sym of VOLATILE_STOCK_ORDER) {
+    const m = s.market[sym];
+    const expected = Math.round(m.startPrice * 1.15 * 100) / 100;
+    assert.equal(
+      m.price, expected,
+      `${sym}: expected ${expected}, got ${m.price}`
+    );
+  }
+});
+
 test('different rngSeeds produce different starting prices', () => {
   const a = createStocksState(1);
   const b = createStocksState(2);

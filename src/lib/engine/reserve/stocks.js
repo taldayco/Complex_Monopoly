@@ -17,6 +17,12 @@ export function createStocksState(rngSeed = 0, { primeHistory = true } = {}) {
     const cat = STOCK_CATALOG[sym];
     market[sym] = {
       symbol: sym,
+      // startPrice anchors the additive-percent math in applyPercentToPrice.
+      // Each card moves price by (startPrice × pct/100) — so a 32-card deck
+      // summing to +15 always returns the stock to start × 1.15 (modulo
+      // wildcards), regardless of compounding. Without this anchor, a single
+      // -100 card would multiply the price by 0 and floor it at $0.01 forever.
+      startPrice: cat.start,
       price: cat.start,
       history: [cat.start],
       deck: cat.type === 'volatile' ? buildDeckSeeded(sym, rngSeed) : [],
@@ -44,6 +50,7 @@ export function hydrateStocks(stocks, rngSeed = 0) {
     if (!stocks.market[sym]) {
       stocks.market[sym] = {
         symbol: sym,
+        startPrice: cat.start,
         price: cat.start,
         history: [cat.start],
         deck: cat.type === 'volatile' ? buildDeckSeeded(sym, rngSeed) : [],
@@ -52,6 +59,7 @@ export function hydrateStocks(stocks, rngSeed = 0) {
       };
     } else {
       const m = stocks.market[sym];
+      if (typeof m.startPrice !== 'number') m.startPrice = cat.start;
       if (typeof m.price !== 'number') m.price = cat.start;
       if (!Array.isArray(m.history)) m.history = [m.price];
       if (!Array.isArray(m.deck)) m.deck = [];
@@ -141,7 +149,7 @@ export function primeStockHistory(stocks) {
       const card = m.deck.shift();
       m.lastCard = card.value;
       m.lastFlipPct = card.value;
-      m.price = applyPercentToPrice(m.price, card.value);
+      m.price = applyPercentToPrice(m.startPrice, m.price, card.value);
       pushHistory(m);
     }
     recalcFP500(stocks);
@@ -171,10 +179,15 @@ function drawTopCard(stocks, symbol, rng) {
   return { card: m.deck.shift(), reshuffled };
 }
 
-function applyPercentToPrice(price, pct) {
-  // Match the original: % change of the current price, with a $0.01 floor.
-  const next = price * (1 + pct / 100);
-  if (!Number.isFinite(next)) return price;
+// Additive-against-start percent: each card moves the price by an absolute
+// dollar amount of (startPrice × pct/100). After applying every card in the
+// deck, the price equals startPrice × (1 + sum_of_pcts/100), independent of
+// order or compounding. Floors at $0.01 so a wildcard run can hammer a stock
+// to ~zero but a positive card always recovers it (vs the old multiplicative
+// math, where one -100 card crashed the price to $0.01 forever).
+function applyPercentToPrice(startPrice, currentPrice, pct) {
+  const next = currentPrice + (startPrice * pct) / 100;
+  if (!Number.isFinite(next)) return currentPrice;
   return Math.max(0.01, Math.round(next * 100) / 100);
 }
 
@@ -211,7 +224,7 @@ export function flipMarket(stocks, rng, now = Date.now()) {
     const m = stocks.market[sym];
     m.lastCard = card.value;
     m.lastFlipPct = card.value;
-    m.price = applyPercentToPrice(m.price, card.value);
+    m.price = applyPercentToPrice(m.startPrice, m.price, card.value);
     pushHistory(m);
     results[sym] = card.value;
   }
@@ -239,7 +252,7 @@ export function flipSingleStock(stocks, symbol, rng, now = Date.now()) {
   const m = stocks.market[symbol];
   m.lastCard = card.value;
   m.lastFlipPct = card.value;
-  m.price = applyPercentToPrice(m.price, card.value);
+  m.price = applyPercentToPrice(m.startPrice, m.price, card.value);
   pushHistory(m);
   recalcFP500(stocks);
   pushHistory(stocks.market[FP500_SYMBOL]);
