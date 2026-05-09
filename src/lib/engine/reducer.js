@@ -52,7 +52,10 @@ import {
 import {
   applyForCard,
   cancelCard,
-  applyTurnStartCardFees
+  applyTurnStartCardFees,
+  chargeCard,
+  payCardBalance,
+  accrueCardInterest
 } from './reserve/cards.js';
 import {
   drawReserveCard,
@@ -124,11 +127,14 @@ function dispatch(state, action, ctx, log) {
     case 'rollDice':         return doRollDice(state, action, ctx, log);
     case 'buyProperty':      return doBuyProperty(state, action, ctx, log);
     case 'buyPropertyWithMortgage': return doBuyPropertyWithMortgage(state, action, ctx, log);
+    case 'buyPropertyWithCard': return doBuyPropertyWithCard(state, action, ctx, log);
     case 'declineToBuy':     return doDeclineToBuy(state, action, ctx, log);
     case 'bid':              return doBid(state, action, ctx, log);
     case 'auctionTick':      return doAuctionTick(state, action, ctx, log);
     case 'marketOpenTick':   return doMarketOpenTick(state, action, ctx, log);
     case 'buyStock':         return doBuyStock(state, action, ctx, log);
+    case 'buyStockWithCard': return doBuyStockWithCard(state, action, ctx, log);
+    case 'payCardBalance':   return doPayCardBalance(state, action, ctx, log);
     case 'sellStock':        return doSellStock(state, action, ctx, log);
     case 'requestLoan':      return doRequestLoan(state, action, ctx, log);
     case 'respondLoanOffer': return doRespondLoanOffer(state, action, ctx, log);
@@ -569,6 +575,42 @@ function doBuyPropertyWithMortgage(state, action, ctx, log) {
   return {};
 }
 
+// Charge a property purchase to a specific credit card. Property transfers
+// immediately; the price lands on the card balance and accrues interest at
+// the card's catalog rate every 4-turn cycle. Per-card minLine caps the
+// charge — a too-large purchase rejects with INSUFFICIENT_CREDIT before any
+// state mutation, so partial-failure rollback is unnecessary.
+function doBuyPropertyWithCard(state, action, ctx, log) {
+  const pa = state.pendingAction;
+  if (!pa || pa.type !== 'buyDecision') return { error: 'NO_BUY_DECISION' };
+  if (pa.seat !== action.seat) return { error: 'NOT_YOUR_DECISION' };
+  if (typeof action.spaceIndex === 'number' && action.spaceIndex !== pa.spaceIndex) {
+    return { error: 'SPACE_MISMATCH' };
+  }
+  const seat = state.seats[action.seat];
+  if (seat.bankrupt) return { error: 'BANKRUPT' };
+  const charge = chargeCard(seat, action.instanceId, pa.price);
+  if (!charge.ok) return { error: charge.error };
+  const result = transferOwnership(state, action.seat, pa.spaceIndex);
+  if (!result.ok) {
+    // Rollback the optimistic charge so a transferOwnership rejection (e.g.
+    // racing OWNED) doesn't leave the player charged for nothing.
+    const inst = seat.creditCards.find((c) => c.id === action.instanceId);
+    if (inst) inst.balance = Math.round(((inst.balance ?? 0) - pa.price) * 100) / 100;
+    return { error: result.error };
+  }
+  log('buyWithCard', action.seat, {
+    spaceIndex: pa.spaceIndex,
+    price: pa.price,
+    instanceId: action.instanceId,
+    cardBalance: charge.balance,
+    creditLine: charge.limit
+  });
+  state.pendingAction = null;
+  recomputePhase(state);
+  return {};
+}
+
 // ---------- AUCTION ----------
 // Free-for-all bidding. Any non-bankrupt seat may bid; each accepted bid resets
 // the timer. Settled by `doAuctionTick` (server-injected on timer expiry) or
@@ -832,6 +874,14 @@ function continueEndTurnFlow(state, ctx, log) {
   if (state.stocks && ctx?.rng) {
     state.stocks.cycle = (state.stocks.cycle ?? 0) + 1;
     if (state.stocks.cycle % AUTO_FLIP_EVERY_N_TURNS === 0) {
+      // Accrue card interest BEFORE flipMarket — the latter mutates
+      // state.stocks.cycle internally (stocks.js bumps round+cycle), so by the
+      // time it returns we'd be off the 4-turn boundary that accrueCardInterest
+      // gates on.
+      const interestEvents = accrueCardInterest(state.seats, state.stocks.cycle);
+      for (const e of interestEvents) {
+        log('cardInterest', e.seatIndex, e);
+      }
       const results = flipMarket(state.stocks, ctx.rng);
       state.rngCursor++;
       clearStaleWildcardReveals(state, results.__reshuffled);
@@ -884,6 +934,46 @@ function doBuyStock(state, action, ctx, log) {
   const r = buyShares(seat, state.stocks, action.symbol, action.qty);
   if (!r.ok) return { error: r.error };
   log('buyStock', action.seat, { symbol: action.symbol, qty: r.qty, cost: r.cost, price: r.price });
+  return {};
+}
+
+// Buy stock funded by a credit card. Bypasses buyShares' cash gate — the
+// charge goes directly on the card balance, then we credit shares and bump
+// cost basis manually. Cost basis tracks the dollar value of the purchase
+// regardless of funding source so realised P&L stays consistent.
+function doBuyStockWithCard(state, action, ctx, log) {
+  const seat = state.seats[action.seat];
+  if (!seat || seat.bankrupt) return { error: 'BANKRUPT' };
+  const symbol = action.symbol;
+  const qty = action.qty;
+  const market = state.stocks?.market?.[symbol];
+  if (!market) return { error: 'UNKNOWN_STOCK' };
+  if (!Number.isInteger(qty) || qty <= 0) return { error: 'BAD_QTY' };
+  const price = market.price ?? 0;
+  const cost = Math.round(price * qty * 100) / 100;
+  const charge = chargeCard(seat, action.instanceId, cost);
+  if (!charge.ok) return { error: charge.error };
+  seat.stockLots[symbol] = (seat.stockLots[symbol] || 0) + qty;
+  seat.stockCostBasis[symbol] = Math.round(((seat.stockCostBasis[symbol] || 0) + cost) * 100) / 100;
+  log('buyStockWithCard', action.seat, {
+    symbol, qty, cost, price,
+    instanceId: action.instanceId,
+    cardBalance: charge.balance,
+    creditLine: charge.limit
+  });
+  return {};
+}
+
+function doPayCardBalance(state, action, ctx, log) {
+  const seat = state.seats[action.seat];
+  if (!seat) return { error: 'NO_SEAT' };
+  const r = payCardBalance(seat, action.instanceId, action.amount);
+  if (!r.ok) return { error: r.error };
+  log('cardPayment', action.seat, {
+    instanceId: action.instanceId,
+    paid: r.paid,
+    balance: r.balance
+  });
   return {};
 }
 

@@ -129,7 +129,7 @@ export const CARD_CATALOG = {
     id: 'vaultPlatinum',
     name: 'Vault Platinum',
     bank: 'Boardwalk National Bank',
-    requiredTier: 'Poor',           // no tier requirement in spec — anyone may apply
+    requiredTier: 'Excellent',
     signingFee: 400,
     signupBonus: 0,
     goFee: 200,

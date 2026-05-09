@@ -102,6 +102,9 @@ function hydrateSeat(s) {
   if (typeof s.creditScore !== 'number') s.creditScore = STARTING_CREDIT_SCORE;
   if (!Array.isArray(s.loans)) s.loans = [];
   if (!Array.isArray(s.creditCards)) s.creditCards = [];
+  for (const c of s.creditCards) {
+    if (typeof c.balance !== 'number') c.balance = 0;
+  }
   if (!s.stockLots || typeof s.stockLots !== 'object') s.stockLots = {};
   if (!s.stockCostBasis || typeof s.stockCostBasis !== 'object') s.stockCostBasis = {};
   if (!Array.isArray(s.transactions)) s.transactions = [];

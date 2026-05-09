@@ -29,6 +29,16 @@
     send({ type: 'cancelCreditCard', instanceId });
   }
 
+  // Per-card pay-amount input. Keyed by instance id so two open cards keep
+  // independent values.
+  let payAmounts = $state({});
+  function pay(instanceId) {
+    const amount = Number(payAmounts[instanceId]);
+    if (!(amount > 0)) return;
+    send({ type: 'payCardBalance', instanceId, amount });
+    payAmounts[instanceId] = '';
+  }
+
   function eligibility(card) {
     if (ownedCardIds.has(card.id)) return { ok: false, reason: 'You already hold this card.' };
     if (!meetsTierRequirement(me ?? {}, card.requiredTier)) {
@@ -51,13 +61,50 @@
         {#each owned as inst (inst.id)}
           {@const card = getCard(inst.cardId)}
           {#if card}
+            {@const balance = inst.balance ?? 0}
+            {@const limit = card.minLine ?? 0}
+            {@const available = Math.max(0, limit - balance)}
             <li>
               <div class="head">
                 <strong>{card.name}</strong>
                 <span class="fee">{Math.round((card.interestRate ?? 0) * 100)}% / 4t</span>
               </div>
+              <div class="balance-line">
+                <span>Balance: <strong class:has-balance={balance > 0}>${fmt(balance)}</strong> / ${fmt(limit)}</span>
+                <span class="ink-mute small">${fmt(available)} available</span>
+              </div>
               <p class="blurb">{card.blurb}</p>
-              <button onclick={() => cancel(inst.id)} disabled={(me?.cash ?? 0) < card.cancelFee}>
+              {#if balance > 0}
+                <div class="pay-row">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="Amount"
+                    bind:value={payAmounts[inst.id]}
+                  />
+                  <button
+                    class="primary"
+                    onclick={() => pay(inst.id)}
+                    disabled={!(Number(payAmounts[inst.id]) > 0) || (me?.cash ?? 0) < Number(payAmounts[inst.id])}
+                  >
+                    Pay
+                  </button>
+                  <button
+                    onclick={() => { payAmounts[inst.id] = balance; pay(inst.id); }}
+                    disabled={(me?.cash ?? 0) < balance}
+                    title={(me?.cash ?? 0) < balance ? `Need $${fmt(balance)} cash` : 'Pay full balance'}
+                  >
+                    Pay full
+                  </button>
+                </div>
+              {/if}
+              <button
+                class="cancel-btn"
+                onclick={() => cancel(inst.id)}
+                disabled={(me?.cash ?? 0) < card.cancelFee || balance > 0}
+                title={balance > 0 ? 'Pay off the balance before cancelling' : ''}
+              >
                 Cancel — ${fmt(card.cancelFee)}
               </button>
             </li>
@@ -125,6 +172,29 @@
   .owned .fee { font-family: monospace; font-size: 0.85rem; color: var(--ink-mute); }
   .owned .blurb { margin: 0.3rem 0; font-size: 0.82rem; color: var(--ink-mute); }
   .owned button { font-size: 0.78rem; }
+  .balance-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+    font-family: monospace;
+  }
+  .balance-line .has-balance { color: var(--danger, #c62828); }
+  .pay-row {
+    display: flex;
+    gap: 0.3rem;
+    margin: 0.4rem 0 0.3rem;
+    align-items: center;
+  }
+  .pay-row input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.8rem;
+  }
+  .pay-row button { flex: 0 0 auto; }
+  .cancel-btn { width: 100%; margin-top: 0.2rem; }
+  .small { font-size: 0.75rem; }
   .empty { color: var(--ink-mute); font-style: italic; margin: 0.4rem 0; font-size: 0.85rem; }
 
   .card-grid {

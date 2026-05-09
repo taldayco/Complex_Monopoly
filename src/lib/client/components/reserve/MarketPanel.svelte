@@ -1,6 +1,7 @@
 <script>
   import { send } from '$lib/client/socket.js';
   import { STOCK_ORDER, STOCK_CATALOG } from '$lib/shared/reserve/stockCatalog.js';
+  import { CARD_CATALOG } from '$lib/shared/reserve/cardCatalog.js';
   import StockChart from './StockChart.svelte';
 
   let { state: gs, mySeat } = $props();
@@ -28,6 +29,28 @@
   function sell() {
     if (!canSell) return;
     send({ type: 'sellStock', symbol: selectedSymbol, qty });
+  }
+
+  // Active credit cards with enough headroom to charge `cost`. Selecting one
+  // and clicking Buy with card sends a buyStockWithCard action.
+  const cardOptions = $derived.by(() => {
+    if (!me || !Array.isArray(me.creditCards)) return [];
+    return me.creditCards
+      .filter((c) => c.status === 'active')
+      .map((c) => {
+        const cat = CARD_CATALOG[c.cardId];
+        const limit = cat?.minLine ?? 0;
+        const balance = c.balance ?? 0;
+        const available = Math.max(0, limit - balance);
+        return { inst: c, cat, limit, balance, available, fits: cost > 0 && cost <= available };
+      });
+  });
+  let selectedCardId = $state('');
+  const selectedCard = $derived(cardOptions.find((o) => o.inst.id === selectedCardId));
+  const canBuyWithCard = $derived(qty > 0 && selectedCard?.fits === true);
+  function buyWithCard() {
+    if (!canBuyWithCard) return;
+    send({ type: 'buyStockWithCard', symbol: selectedSymbol, qty, instanceId: selectedCardId });
   }
 
   function fmt(v) {
@@ -158,6 +181,24 @@
     <button class="primary" onclick={buy} disabled={!canBuy}>Buy {qty} share{qty === 1 ? '' : 's'}</button>
     <button onclick={sell} disabled={!canSell}>Sell {qty} share{qty === 1 ? '' : 's'}</button>
   </div>
+  {#if cardOptions.length > 0}
+    <div class="card-buy">
+      <label>
+        Pay with card
+        <select bind:value={selectedCardId}>
+          <option value="">— pick a card —</option>
+          {#each cardOptions as opt (opt.inst.id)}
+            <option value={opt.inst.id} disabled={!opt.fits}>
+              {opt.cat?.name ?? opt.inst.cardId} (${opt.balance} / ${opt.limit})
+            </option>
+          {/each}
+        </select>
+      </label>
+      <button onclick={buyWithCard} disabled={!canBuyWithCard}>
+        Buy {qty} on card
+      </button>
+    </div>
+  {/if}
 </div>
 
 {#if gs.stocks?.lastFlip}
@@ -213,5 +254,16 @@
   .cost { font-size: 0.9rem; display: flex; gap: 1rem; flex-wrap: wrap; }
   .actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
   .actions button { flex: 1; }
+  .card-buy {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px dashed var(--panel-border);
+    align-items: flex-end;
+  }
+  .card-buy label { display: flex; flex-direction: column; flex: 1; font-size: 0.78rem; gap: 0.15rem; }
+  .card-buy select { padding: 0.2rem 0.3rem; font-size: 0.8rem; }
+  .card-buy button { flex: 0 0 auto; font-size: 0.8rem; }
   .small { font-size: 0.8rem; }
 </style>

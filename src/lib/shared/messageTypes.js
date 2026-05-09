@@ -9,6 +9,7 @@ export const C2S = {
   ROLL_DICE: 'rollDice',
   BUY_PROPERTY: 'buyProperty',
   BUY_PROPERTY_WITH_MORTGAGE: 'buyPropertyWithMortgage',
+  BUY_PROPERTY_WITH_CARD: 'buyPropertyWithCard',
   DECLINE_TO_BUY: 'declineToBuy',
   BID: 'bid',
   PASS_AUCTION: 'passAuction',
@@ -37,6 +38,7 @@ export const C2S = {
 
   // Reserve: stocks
   BUY_STOCK: 'buyStock',
+  BUY_STOCK_WITH_CARD: 'buyStockWithCard',
   SELL_STOCK: 'sellStock',
 
   // Reserve: credit cards
@@ -44,6 +46,7 @@ export const C2S = {
   BANKER_ASSIGN_CARD: 'bankerAssignCard',
   BANKER_REVOKE_CARD: 'bankerRevokeCard',
   CANCEL_CREDIT_CARD: 'cancelCreditCard',
+  PAY_CARD_BALANCE: 'payCardBalance',
 
   // Reserve: event cards
   BANKER_SEND_EVENT_CARD: 'bankerSendEventCard',

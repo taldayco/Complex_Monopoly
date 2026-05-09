@@ -3,6 +3,7 @@
   import { BOARD, isOwnable } from '$lib/shared/board.js';
   import { COLOR_GROUPS, BUY_MORTGAGE_PTR, BUY_MORTGAGE_TERMS } from '$lib/shared/constants.js';
   import { getTierByScore } from '$lib/shared/reserve/loanCatalog.js';
+  import { CARD_CATALOG } from '$lib/shared/reserve/cardCatalog.js';
   import { ui, openReserve } from '$lib/client/stores.svelte.js';
 
   // Alias the `state` prop to `gs` locally — having a variable literally
@@ -52,6 +53,28 @@
     const installment = Math.round((totalDebt / term) * 100) / 100;
     return { principal, term, totalDebt, installment };
   });
+
+  // Active credit cards with enough headroom to charge the listed price.
+  const cardOptions = $derived.by(() => {
+    if (!me || !Array.isArray(me.creditCards)) return [];
+    return me.creditCards
+      .filter((c) => c.status === 'active')
+      .map((c) => {
+        const cat = CARD_CATALOG[c.cardId];
+        const limit = cat?.minLine ?? 0;
+        const balance = c.balance ?? 0;
+        const available = Math.max(0, limit - balance);
+        const fits = pending?.type === 'buyDecision' ? pending.price <= available : false;
+        return { inst: c, cat, limit, balance, available, fits };
+      });
+  });
+  function buyWithCard(instanceId) {
+    send({
+      type: 'buyPropertyWithCard',
+      instanceId,
+      spaceIndex: pending?.spaceIndex
+    });
+  }
 
   const canBuyDecision = $derived(
     pending?.type === 'buyDecision' && pending.seat === me?.seat
@@ -118,6 +141,22 @@
           <div class="quote">
             ${mortgageQuote.installment}/turn × {mortgageQuote.term}
             (total ${mortgageQuote.totalDebt})
+          </div>
+        {/if}
+        {#if cardOptions.length > 0}
+          <div class="mortgage-section card-section">
+            <div class="mortgage-label">Buy with Credit Card</div>
+            {#each cardOptions as opt (opt.inst.id)}
+              <button
+                class="card-row"
+                onclick={() => buyWithCard(opt.inst.id)}
+                disabled={!opt.fits}
+                title={opt.fits ? '' : `Need $${pending.price} of credit; only $${opt.available} available`}
+              >
+                <span class="card-name">{opt.cat?.name ?? opt.inst.cardId}</span>
+                <span class="card-meta">${opt.balance} / ${opt.limit} · {Math.round((opt.cat?.interestRate ?? 0) * 100)}%/4t</span>
+              </button>
+            {/each}
           </div>
         {/if}
         <button
@@ -237,6 +276,23 @@
     border-color: var(--accent);
   }
   .term-pill[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .card-section { gap: 0.25rem; }
+  .card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid var(--panel-border);
+    background: var(--panel);
+    color: inherit;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .card-row:hover:not([disabled]) { border-color: var(--accent); }
+  .card-row[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .card-row .card-name { font-weight: 600; }
+  .card-row .card-meta { font-family: monospace; color: var(--ink-mute); font-size: 0.72rem; }
   .quote {
     font-family: monospace;
     font-size: 0.78rem;
