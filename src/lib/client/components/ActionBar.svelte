@@ -187,7 +187,7 @@
     <button onclick={() => (ui.showPropertiesModal = true)}>Properties</button>
     <button onclick={() => openReserve('cards')}>Cards</button>
     <button onclick={() => openReserve('loans')}>Loans</button>
-    <button onclick={() => openReserve('wire')}>Wire</button>
+    <button onclick={() => openReserve('bank')}>Bank</button>
     <button onclick={() => openReserve('requests')}>Requests</button>
   </div>
 

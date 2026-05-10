@@ -4,7 +4,7 @@
   import MarketPanel from './MarketPanel.svelte';
   import LoansPanel from './LoansPanel.svelte';
   import CardsPanel from './CardsPanel.svelte';
-  import WirePanel from './WirePanel.svelte';
+  import BankPanel from './BankPanel.svelte';
   import RequestsPanel from './RequestsPanel.svelte';
 
   let { state: gs, mySeat } = $props();
@@ -16,7 +16,7 @@
     { id: 'market', label: 'Market' },
     { id: 'cards', label: 'Cards' },
     { id: 'loans', label: 'Loans' },
-    { id: 'wire', label: 'Wire' },
+    { id: 'bank', label: 'Bank' },
     { id: 'requests', label: 'Requests' }
   ];
 
@@ -70,8 +70,8 @@
         <CardsPanel state={gs} {mySeat} />
       {:else if ui.reserveTab === 'loans'}
         <LoansPanel state={gs} {mySeat} />
-      {:else if ui.reserveTab === 'wire'}
-        <WirePanel state={gs} {mySeat} />
+      {:else if ui.reserveTab === 'bank'}
+        <BankPanel state={gs} {mySeat} />
       {:else if ui.reserveTab === 'requests'}
         <RequestsPanel state={gs} {mySeat} />
       {/if}

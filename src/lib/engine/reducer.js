@@ -84,12 +84,7 @@ import {
   getGoLandingBonusFor,
   getOtherLandingBonusFor
 } from '../shared/reserve/cardCatalog.js';
-import {
-  drawReserveCard,
-  discardReserveCard,
-  applyEventCard,
-  decayTempEffects
-} from './reserve/eventCards.js';
+import { decayTempEffects } from './reserve/eventCards.js';
 import {
   doWireTransfer,
   createTransferRequest,
@@ -238,7 +233,6 @@ function dispatch(state, action, ctx, log) {
     case 'requestCreditCard': return doRequestCreditCard(state, action, ctx, log);
     case 'requestCreditLineIncrease': return doRequestCreditLineIncrease(state, action, ctx, log);
     case 'cancelCreditCard': return doCancelCreditCard(state, action, ctx, log);
-    case 'dismissEventCard': return doDismissEventCard(state, action, ctx, log);
     case 'wireTransfer':     return doWireAction(state, action, ctx, log);
     case 'requestTransfer':  return doRequestTransferAction(state, action, ctx, log);
     case 'respondTransfer':  return doRespondTransferAction(state, action, ctx, log);
@@ -434,7 +428,6 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
         log('drawCard', seatIndex, { deck: 'chance', id, text: card.text });
         applyCardEffect(state, seatIndex, ctx, log, card, id, 'chance', opts.diceTotal);
       }
-      autoDrawReserveCard(state, seatIndex, 'chance', ctx, log);
       return;
     }
 
@@ -444,7 +437,6 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
         log('drawCard', seatIndex, { deck: 'communityChest', id, text: card.text });
         applyCardEffect(state, seatIndex, ctx, log, card, id, 'communityChest', opts.diceTotal);
       }
-      autoDrawReserveCard(state, seatIndex, 'community', ctx, log);
       return;
     }
 
@@ -1397,8 +1389,6 @@ function continueEndTurnFlow(state, ctx, log) {
         effects: expired.map((e) => e.effectId)
       });
     }
-    // Reset the once-per-turn event-card flag.
-    newSeat.drewEventCardThisTurn = false;
     const hysaEvents = applyHysaInterestAtTurnStart(
       newSeat,
       state.economy?.reserveRate ?? 0
@@ -1625,45 +1615,6 @@ function doCancelCreditCard(state, action, ctx, log) {
     instanceId: action.instanceId,
     cancelFee: r.cancelFee
   });
-  return {};
-}
-
-// ---------- EVENT CARDS ----------
-// Auto-draw a reserve event card for the seat. Called from applySpaceEffect
-// when a player lands on a chance / community-chest space. Idempotent within a
-// turn — the once-per-turn flag (also used by the legacy code path) prevents a
-// second auto-draw when doubles re-land on a card space. Silently no-ops on
-// bankruptcy or empty decks; failures are logged but never block the landing.
-function autoDrawReserveCard(state, seatIndex, deckName, ctx, log) {
-  const seat = state.seats[seatIndex];
-  if (!seat || seat.bankrupt) return;
-  if (seat.drewEventCardThisTurn) return;
-  if (deckName !== 'community' && deckName !== 'chance') return;
-  const cardId = drawReserveCard(state, deckName, ctx.rng);
-  state.rngCursor++;
-  if (!cardId) return;
-  const r = applyEventCard(state, seatIndex, deckName, cardId, ctx, log);
-  discardReserveCard(state, deckName, cardId);
-  if (!r.ok) return;
-  seat.lastDrawnEventCard = {
-    cardId,
-    deck: deckName,
-    drawnAt: Date.now(),
-    results: r.results
-  };
-  seat.drewEventCardThisTurn = true;
-  log('eventCardDrawn', seatIndex, {
-    cardId,
-    deck: deckName,
-    effects: r.results.effects
-  });
-}
-
-function doDismissEventCard(state, action, ctx, log) {
-  const seat = state.seats[action.seat];
-  if (!seat) return { error: 'NO_SEAT' };
-  if (!seat.lastDrawnEventCard) return { error: 'NO_CARD' };
-  seat.lastDrawnEventCard = null;
   return {};
 }
 

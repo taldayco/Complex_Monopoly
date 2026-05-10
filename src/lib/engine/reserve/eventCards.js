@@ -67,33 +67,6 @@ export function hydrateReserveDecks(state) {
   }
 }
 
-// ---------- DRAW ----------
-
-// Pulls the top card id from the named deck. If the deck is empty, the
-// discard pile is reshuffled into a fresh deck first. Returns the card id, or
-// null if both piles are empty (shouldn't happen with our static catalogs).
-export function drawReserveCard(state, deckName, rng) {
-  const slot = state.reserveDecks?.[deckName];
-  if (!slot) return null;
-  if (slot.deck.length === 0) {
-    if (slot.discard.length === 0) return null;
-    const reshuffled = slot.discard.slice();
-    for (let i = reshuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [reshuffled[i], reshuffled[j]] = [reshuffled[j], reshuffled[i]];
-    }
-    slot.deck = reshuffled;
-    slot.discard = [];
-  }
-  return slot.deck.shift();
-}
-
-export function discardReserveCard(state, deckName, cardId) {
-  const slot = state.reserveDecks?.[deckName];
-  if (!slot) return;
-  slot.discard.push(cardId);
-}
-
 // ---------- RESOLVE ----------
 
 // Resolves a single drawn card. Returns a `results` object describing what

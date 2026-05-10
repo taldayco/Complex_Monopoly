@@ -24,10 +24,6 @@
   const currentSeat = $derived(gs.seats[gs.turn.seat]);
   const isMyTurn = $derived(gs.turn.seat === session.seat);
 
-  // Card-draw modal queue. Card landings can fire two draws back-to-back
-  // (legacy chance/community + the reserve event card). Push each onto a
-  // FIFO queue so the player sees them one at a time instead of one
-  // overwriting the other.
   let cardQueue = $state([]);
   let lastSeenLogIndex = $state(-1);
   const recentCard = $derived(cardQueue[0] ?? null);
@@ -45,13 +41,6 @@
       if (e.seat !== session.seat) continue;
       if (e.type === 'drawCard') {
         newCards.push(e.payload);
-      } else if (e.type === 'eventCardDrawn') {
-        newCards.push({
-          kind: 'reserve',
-          deck: e.payload.deck,
-          cardId: e.payload.cardId,
-          results: { effects: e.payload.effects ?? [] }
-        });
       }
     }
     if (newCards.length > 0) cardQueue = [...cardQueue, ...newCards];
@@ -62,7 +51,6 @@
     cardQueue = cardQueue.slice(1);
   }
 
-  const auction = $derived(gs.pendingAction?.type === 'auction' ? gs.pendingAction : null);
   const settleDebt = $derived(gs.pendingAction?.type === 'settleDebt' && gs.pendingAction.debtorSeat === session.seat ? gs.pendingAction : null);
   const incomingTrade = $derived(gs.pendingTrade && gs.pendingTrade.toSeat === session.seat ? gs.pendingTrade : null);
 
@@ -132,8 +120,10 @@
     />
   {/if}
 
-  {#if auction}
-    <AuctionModal state={gs} {auction} mySeat={session.seat} />
+  {#if gs.pendingAction?.type === 'auction'}
+    {#key `${gs.pendingAction.spaceIndex}:${gs.pendingAction.attempt ?? 0}`}
+      <AuctionModal state={gs} auction={gs.pendingAction} mySeat={session.seat} />
+    {/key}
   {/if}
 
   {#if settleDebt}

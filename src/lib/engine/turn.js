@@ -28,6 +28,9 @@ export function advanceTurn(state) {
   const next = nextActiveSeatAfter(state, state.turn.seat);
   if (next == null) {
     state.phase = 'finished';
+    state.finishedAt = Date.now();
+    const remaining = state.seats.filter((s) => !s.bankrupt);
+    state.winnerSeat = remaining[0]?.seat ?? null;
     return;
   }
   startNewTurn(state, next);

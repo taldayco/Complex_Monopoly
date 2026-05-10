@@ -334,8 +334,6 @@ function scrubState(room, viewerSeat) {
         nextPermitFeeModifier: s.nextPermitFeeModifier ?? null,
         pendingLoanOffer: s.pendingLoanOffer ?? null,
         bankAccounts: s.bankAccounts ?? null,
-        lastDrawnEventCard: scrubLastDrawnEventCard(s.lastDrawnEventCard, isSelf),
-        drewEventCardThisTurn: s.drewEventCardThisTurn ?? false,
         // Private to the owning seat: revealed wildcard values from insider tips.
         revealedWildcards: isSelf ? (s.revealedWildcards ?? {}) : {}
       };
@@ -345,25 +343,6 @@ function scrubState(room, viewerSeat) {
       deckSize: room.communityChest.deck.length,
       discardSize: room.communityChest.discard.length
     }
-  };
-}
-
-// Strip wildcard reveal payloads from other seats' lastDrawnEventCard entries
-// so non-owners can see the card was drawn (deck/cardId/blurb) but never the
-// revealed values. The owner's view is left untouched.
-function scrubLastDrawnEventCard(card, isSelf) {
-  if (!card) return null;
-  if (isSelf) return card;
-  const effects = Array.isArray(card?.results?.effects)
-    ? card.results.effects.map((eff) => {
-        if (eff?.kind !== 'revealWildcards') return eff;
-        const { wildCards, inDeck, ...redacted } = eff;
-        return redacted;
-      })
-    : card?.results?.effects;
-  return {
-    ...card,
-    results: card.results ? { ...card.results, effects } : card.results
   };
 }
 

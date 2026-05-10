@@ -96,14 +96,8 @@ test('applyEventCard cmty.bankPaysInstallment pays installment on existing loan'
   assert.equal(loan.dueThisTurn, false);
 });
 
-// ---------- auto-draw on board landing ----------
+// ---------- landing draws exactly one card per Chance/CC tile ----------
 
-// Position a seat just behind a target space and roll dice using a fixed
-// total. We set a deterministic rng that returns predictable doubles-free
-// values: rollDice consumes two rng() calls. With our LCG, seed=1 yields
-// d1=4, d2=2 first call set — but to keep this test independent of LCG
-// internals, we monkey-patch ctx.rng to return values that produce d1+d2=8
-// and not-doubles.
 function rngForTotal(d1Target, d2Target) {
   let i = 0;
   return () => {
@@ -113,35 +107,32 @@ function rngForTotal(d1Target, d2Target) {
   };
 }
 
-test('landing on Chance auto-draws a reserve event card and sets the flag', () => {
+test('landing on Chance draws one legacy chance card; reserve deck untouched', () => {
   let s = makeRoom(2);
   s.seats[0].cash = 5000;
-  s.seats[0].position = 0;          // GO
+  s.seats[0].position = 0;
   s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
-  const beforeDeck = s.reserveDecks.chance.deck.length;
-  // Roll d1=4, d2=3 → total 7 → land on Chance (index 7).
+  const beforeReserveChance = s.reserveDecks.chance.deck.length;
+  const beforeChance = s.chance.deck.length;
   s = step(s, { type: 'rollDice', seat: 0 }, { rng: rngForTotal(4, 3) });
   assert.equal(s.seats[0].position, 7);
-  assert.equal(s.reserveDecks.chance.deck.length, beforeDeck - 1);
-  assert.equal(s.reserveDecks.chance.discard.length, 1);
-  assert.ok(s.seats[0].lastDrawnEventCard, 'lastDrawnEventCard populated');
-  assert.equal(s.seats[0].lastDrawnEventCard.deck, 'chance');
-  assert.equal(s.seats[0].drewEventCardThisTurn, true);
+  assert.equal(s.reserveDecks.chance.deck.length, beforeReserveChance);
+  assert.equal(s.reserveDecks.chance.discard.length, 0);
+  assert.equal(s.chance.deck.length + s.chance.discard.length, beforeChance);
 });
 
-test('landing on Community Chest auto-draws from the reserve community deck', () => {
+test('landing on Community Chest draws one legacy CC card; reserve deck untouched', () => {
   let s = makeRoom(2);
   s.seats[0].cash = 5000;
-  s.seats[0].position = 0;          // GO
+  s.seats[0].position = 0;
   s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
-  const beforeDeck = s.reserveDecks.community.deck.length;
-  // Roll d1=1, d2=1 → total 2 → land on Community Chest (index 2). Doubles.
+  const beforeReserveCommunity = s.reserveDecks.community.deck.length;
+  const beforeCommunity = s.communityChest.deck.length;
   s = step(s, { type: 'rollDice', seat: 0 }, { rng: rngForTotal(1, 1) });
   assert.equal(s.seats[0].position, 2);
-  assert.equal(s.reserveDecks.community.deck.length, beforeDeck - 1);
-  assert.ok(s.seats[0].lastDrawnEventCard);
-  assert.equal(s.seats[0].lastDrawnEventCard.deck, 'community');
-  assert.equal(s.seats[0].drewEventCardThisTurn, true);
+  assert.equal(s.reserveDecks.community.deck.length, beforeReserveCommunity);
+  assert.equal(s.reserveDecks.community.discard.length, 0);
+  assert.equal(s.communityChest.deck.length + s.communityChest.discard.length, beforeCommunity);
 });
 
 test('flipEventCard action is no longer accepted (manual draw removed)', () => {
@@ -152,15 +143,12 @@ test('flipEventCard action is no longer accepted (manual draw removed)', () => {
   assert.equal(r.error, 'UNKNOWN_ACTION');
 });
 
-test('dismissEventCard: clears lastDrawnEventCard after auto-draw', () => {
-  let s = makeRoom(2);
-  s.seats[0].cash = 5000;
-  s.seats[0].position = 0;
+test('dismissEventCard action is no longer accepted', () => {
+  const s = makeRoom(2);
   s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
-  s = step(s, { type: 'rollDice', seat: 0 }, { rng: rngForTotal(4, 3) });
-  assert.ok(s.seats[0].lastDrawnEventCard);
-  s = step(s, { type: 'dismissEventCard', seat: 0 });
-  assert.equal(s.seats[0].lastDrawnEventCard, null);
+  const r = reducer(s, { type: 'dismissEventCard', seat: 0 }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'UNKNOWN_ACTION');
 });
 
 // ---------- temp-effect lifecycle ----------

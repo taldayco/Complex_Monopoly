@@ -52,11 +52,6 @@ export const C2S = {
   CANCEL_CREDIT_CARD: 'cancelCreditCard',
   PAY_CARD_BALANCE: 'payCardBalance',
 
-  // Reserve: event cards
-  BANKER_SEND_EVENT_CARD: 'bankerSendEventCard',
-  EVENT_CARD_ACTION: 'eventCardAction',
-  DISMISS_EVENT_CARD: 'dismissEventCard',
-
   // Reserve: wire transfers
   WIRE_TRANSFER: 'wireTransfer',
   REQUEST_TRANSFER: 'requestTransfer',

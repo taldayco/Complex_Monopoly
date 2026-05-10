@@ -22,7 +22,7 @@ export const ui = $state({
   tradeTarget: null,
   showProperties: false,
   showReserve: false,
-  reserveTab: 'market', // 'market' | 'loans' | 'cards' | 'wire' | 'requests'
+  reserveTab: 'market', // 'market' | 'loans' | 'cards' | 'bank' | 'requests'
   showPropertiesModal: false,
   showMarketMonitor: false
 });

@@ -81,8 +81,6 @@ export function newSeat({ seat, playerToken, name, tokenPiece }) {
     loanTurnResponded: true,
     mortgageTurnResponded: true,
     pendingLoanOffer: null,
-    lastDrawnEventCard: null,
-    drewEventCardThisTurn: false,
     revealedWildcards: {},
     bankAccounts: {
       mmcu: { open: false, balance: 0, openedAt: 0 },
@@ -137,8 +135,6 @@ function hydrateSeat(s) {
   if (typeof s.loanTurnResponded !== 'boolean') s.loanTurnResponded = true;
   if (typeof s.mortgageTurnResponded !== 'boolean') s.mortgageTurnResponded = true;
   if (s.pendingLoanOffer === undefined) s.pendingLoanOffer = null;
-  if (s.lastDrawnEventCard === undefined) s.lastDrawnEventCard = null;
-  if (typeof s.drewEventCardThisTurn !== 'boolean') s.drewEventCardThisTurn = false;
   if (!s.revealedWildcards || typeof s.revealedWildcards !== 'object') s.revealedWildcards = {};
   delete s.hysaRate;
   ensureSeatBankAccounts(s);
