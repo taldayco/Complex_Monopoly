@@ -138,6 +138,48 @@ export const RESERVE_COMMUNITY_DECK = [
     name: 'Wrongfully Accused',
     blurb: 'If in jail, leave immediately and receive $200. Else keep until used.',
     effects: [{ kind: 'wrongfullyAccused' }]
+  },
+  {
+    id: 'cmty.callOptionBORR',
+    name: 'Call Option: BORR @ $30',
+    blurb: 'Buy 1 share of BORR right now at $30.',
+    effects: [{ kind: 'fixedTradeStock', symbol: 'BORR', qty: 1, price: 30, direction: 'buy' }]
+  },
+  {
+    id: 'cmty.putOptionRRRD',
+    name: 'Put Option: RRRD @ $50',
+    blurb: 'Sell 1 share of RRRD right now at $50.',
+    effects: [{ kind: 'fixedTradeStock', symbol: 'RRRD', qty: 1, price: 50, direction: 'sell' }]
+  },
+  {
+    id: 'cmty.analystUpgrade',
+    name: 'Analyst Upgrade',
+    blurb: 'Choose any volatile stock. Its price rises 10%.',
+    effects: [{ kind: 'cardChoice', choiceKind: 'stockUpgrade', amount: 0.10 }]
+  },
+  {
+    id: 'cmty.analystDowngrade',
+    name: 'Analyst Downgrade',
+    blurb: 'Choose any volatile stock. Its price falls 10%.',
+    effects: [{ kind: 'cardChoice', choiceKind: 'stockUpgrade', amount: -0.10 }]
+  },
+  {
+    id: 'cmty.cousinBanker',
+    name: 'Cousin at the Bank',
+    blurb: 'Choose any active loan. Its rate drops 1% (floored at 0).',
+    effects: [{ kind: 'cardChoice', choiceKind: 'rateDiscount', amount: -0.01 }]
+  },
+  {
+    id: 'cmty.refinance',
+    name: 'Refinance Offer',
+    blurb: 'Choose any active loan. Reroll its rate using your current tier.',
+    effects: [{ kind: 'cardChoice', choiceKind: 'refinance' }]
+  },
+  {
+    id: 'cmty.insiderTip',
+    name: 'Insider Tip',
+    blurb: 'Choose any volatile stock. Privately reveal the next card on its deck.',
+    effects: [{ kind: 'cardChoice', choiceKind: 'insiderTip' }]
   }
 ];
 
@@ -354,6 +396,12 @@ export const RESERVE_CHANCE_DECK = [
     name: 'Regional Bank Failure',
     blurb: 'Roll a die. Odd = MMCU affected. Even = Boardwalk. Balances above FDIC limits are lost.',
     effects: [{ kind: 'regionalBankFailure' }]
+  },
+  {
+    id: 'chance.financialCrisis',
+    name: 'Financial Crisis',
+    blurb: 'Inflation resets to 1.0 and freezes for 10 turns. Interest rate freezes for 8 turns. All bank balances above FDIC ($5000) are wiped.',
+    effects: [{ kind: 'financialCrisis', inflationFreezeTurns: 10, interestFreezeTurns: 8 }]
   }
 ];
 

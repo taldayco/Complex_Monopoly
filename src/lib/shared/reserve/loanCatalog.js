@@ -56,6 +56,21 @@ export function getTierByScore(score) {
   return tier;
 }
 
+export function effectiveTier(seat) {
+  const base = getTierByScore(seat?.creditScore ?? 0);
+  let baseIdx = CREDIT_TIERS.findIndex((t) => t.name === base.name);
+  if (baseIdx < 0) baseIdx = 0;
+  let boost = 0;
+  for (const eff of seat?.tempEffects ?? []) {
+    if (eff?.effectId === 'tierBoost' && typeof eff.payload?.tiers === 'number') {
+      boost += eff.payload.tiers;
+    }
+  }
+  if (boost <= 0) return base;
+  const idx = Math.min(CREDIT_TIERS.length - 1, baseIdx + boost);
+  return CREDIT_TIERS[idx];
+}
+
 export function sumOpenBankBalances(seat) {
   const accts = seat?.bankAccounts;
   if (!accts) return 0;
@@ -79,8 +94,7 @@ export function sumActiveLoanBalances(seat) {
 }
 
 export function calcMaxStandardLoan(seat, opts = {}) {
-  const score = seat?.creditScore ?? 0;
-  const tier = getTierByScore(score);
+  const tier = effectiveTier(seat);
   const mult = TIER_MULTIPLIER_FOR_LINE[tier.name] ?? 0;
   if (mult === 0) return 0;
   const cash = typeof seat?.cash === 'number' ? seat.cash : 0;
@@ -89,14 +103,16 @@ export function calcMaxStandardLoan(seat, opts = {}) {
   if (typeof opts.cardLineBonus === 'number' && opts.cardLineBonus > 0) {
     raw *= 1 + opts.cardLineBonus;
   }
-  if (typeof opts.tempBoost === 'number' && opts.tempBoost > 0) {
-    raw *= 1 + opts.tempBoost;
+  if (typeof opts.lineMultiplier === 'number' && opts.lineMultiplier > 0) {
+    raw *= opts.lineMultiplier;
   }
   return Math.round(raw / 50) * 50;
 }
 
 export function calcLoanOptions(score, principal, roll, opts = {}) {
-  const tier = getTierByScore(score);
+  const tier = opts.tierNameOverride && TIER_BY_NAME[opts.tierNameOverride]
+    ? TIER_BY_NAME[opts.tierNameOverride]
+    : getTierByScore(score);
   if (tier.name === 'Poor' || tier.name === 'Very Poor') return null;
   const r = Math.max(1, Math.min(6, Math.floor(roll)));
   const baseRate = PTR_BY_TIER_AND_DICE[tier.name][r - 1];

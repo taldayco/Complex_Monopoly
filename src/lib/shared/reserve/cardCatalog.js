@@ -2,6 +2,7 @@ import {
   CREDIT_TIERS,
   TIER_BY_NAME,
   TIER_MULTIPLIER_FOR_LINE,
+  effectiveTier,
   getTierByScore,
   sumOpenBankBalances,
   sumActiveLoanBalances,
@@ -174,8 +175,7 @@ export function getCardBankCode(cardId) {
 }
 
 export function meetsTierRequirement(seat, requiredTierName) {
-  const score = seat?.creditScore ?? 0;
-  const seatTier = getTierByScore(score);
+  const seatTier = effectiveTier(seat);
   return TIER_RANK[seatTier.name] >= TIER_RANK[requiredTierName];
 }
 
@@ -199,8 +199,7 @@ function sumActiveCardLineBonus(seat) {
 export function calcCreditLine(seat, cardId) {
   const card = CARD_CATALOG[cardId];
   if (!card) return 0;
-  const score = seat?.creditScore ?? 0;
-  const tier = getTierByScore(score);
+  const tier = effectiveTier(seat);
   const mult = TIER_MULTIPLIER_FOR_LINE[tier.name] ?? 0;
   const cash = typeof seat?.cash === 'number' ? seat.cash : 0;
   const base = Math.max(0, cash + sumOpenBankBalances(seat) - sumActiveLoanBalances(seat));

@@ -6,14 +6,27 @@ import { inflatedPrice } from '../shared/economy/inflation.js';
 function effectiveDevelopmentCost(state, seat, listedCost) {
   const inflated = inflatedPrice(state, listedCost);
   const rebate = getDevelopmentRebateFor(seat);
-  if (rebate <= 0) return inflated;
-  return Math.round(inflated * (1 - rebate) * 100) / 100;
+  let cost = rebate > 0
+    ? Math.round(inflated * (1 - rebate) * 100) / 100
+    : inflated;
+  const mod = seat?.nextDevModifier;
+  if (mod && !mod.consumed && typeof mod.amount === 'number') {
+    cost = Math.round(cost * (1 + mod.amount) * 100) / 100;
+    if (cost < 0) cost = 0;
+  }
+  return cost;
 }
 
 export function calcPermitFees(state, seatIndex, spaceIndex, devSubtotal) {
   const space = BOARD[spaceIndex];
   if (!space || space.type !== 'property') return { feesByRecipient: new Map(), totalFees: 0 };
-  const feePerProperty = Math.round(devSubtotal * 0.25 * 100) / 100;
+  const seat = state.seats?.[seatIndex];
+  let feePerProperty = Math.round(devSubtotal * 0.25 * 100) / 100;
+  const mod = seat?.nextPermitFeeModifier;
+  if (mod && !mod.consumed && typeof mod.amount === 'number') {
+    feePerProperty = Math.round(feePerProperty * (1 + mod.amount) * 100) / 100;
+    if (feePerProperty < 0) feePerProperty = 0;
+  }
   const feesByRecipient = new Map();
   let totalFees = 0;
   for (const i of COLOR_GROUPS[space.colorGroup] ?? []) {
@@ -88,6 +101,12 @@ export function buyHouse(state, seatIndex, spaceIndex) {
   }
   prop.houses = target;
   seat.cash = Math.round((seat.cash - check.cost) * 100) / 100;
+  if (seat.nextDevModifier && !seat.nextDevModifier.consumed) {
+    seat.nextDevModifier = null;
+  }
+  if (seat.nextPermitFeeModifier && !seat.nextPermitFeeModifier.consumed) {
+    seat.nextPermitFeeModifier = null;
+  }
   return {
     ok: true,
     cost: check.cost,
@@ -118,7 +137,7 @@ export function canSellHouse(state, seatIndex, spaceIndex) {
     return { ok: false, error: 'NO_HOUSES_IN_BANK' };
   }
 
-  return { ok: true, refund: Math.floor(space.houseCost / 2) };
+  return { ok: true, refund: Math.round(inflatedPrice(state, space.houseCost) * 50) / 100 };
 }
 
 export function sellHouse(state, seatIndex, spaceIndex) {
@@ -127,7 +146,7 @@ export function sellHouse(state, seatIndex, spaceIndex) {
   const space = BOARD[spaceIndex];
   const prop = state.properties[spaceIndex];
   const seat = state.seats[seatIndex];
-  const refund = Math.floor(space.houseCost / 2);
+  const refund = Math.round(inflatedPrice(state, space.houseCost) * 50) / 100;
 
   if (prop.houses === 5) {
     state.bank.hotelsAvailable += 1;
@@ -137,6 +156,6 @@ export function sellHouse(state, seatIndex, spaceIndex) {
     state.bank.housesAvailable += 1;
     prop.houses -= 1;
   }
-  seat.cash += refund;
+  seat.cash = Math.round((seat.cash + refund) * 100) / 100;
   return { ok: true, refund, houses: prop.houses };
 }

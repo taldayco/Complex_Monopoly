@@ -106,3 +106,28 @@ test('chooseTrainDestination rejects invalid space', () => {
   assert.equal(r.ok, false);
   assert.equal(r.error, 'INVALID_CHOICE');
 });
+
+test('endTurn is blocked while pendingTrainTravel is unresolved', () => {
+  let s = makeRoom(2);
+  giveProperty(s, 1, 5);
+  giveProperty(s, 1, 15);
+  s = landSeatOnRailroad(s, 0, 5);
+  assert.ok(s.pendingTrainTravel);
+  s.turn.phase = 'endable';
+  const r = reducer(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'BLOCKED_BY_TRAIN_TRAVEL');
+});
+
+test('rollDice is blocked while pendingTrainTravel is unresolved (no doubles teleport-bypass)', () => {
+  let s = makeRoom(2);
+  giveProperty(s, 1, 5);
+  giveProperty(s, 1, 15);
+  s = landSeatOnRailroad(s, 0, 5);
+  assert.ok(s.pendingTrainTravel);
+  s.turn.phase = 'preRoll';
+  s.turn.lastRollWasDoubles = true;
+  const r = reducer(s, { type: 'rollDice', seat: 0 }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'BLOCKED_BY_TRAIN_TRAVEL');
+});

@@ -45,9 +45,13 @@ export function handleDisconnect(socket) {
   const ss = socketState.get(socket);
   if (!ss) return;
   const room = getRoom(ss.roomCode);
-  if (!room) return;
+  if (!room) {
+    socketState.delete(socket);
+    return;
+  }
   setSeatConnection(ss.roomCode, ss.playerToken, false);
   removeSocketFromRoom(ss.roomCode, socket);
+  socketState.delete(socket);
   broadcastState(ss.roomCode);
 }
 
@@ -165,34 +169,29 @@ export function runServerAction(roomCode, action) {
   broadcastState(roomCode);
 }
 
-// Inspect reducer events and (re)arm the auction timer. Both `auctionStart`
-// (queue drain on End Turn) and `bid` (timer reset) carry an `endsAtMs`. When
-// the auction settles, an `auctionEnd` event triggers the cancel — but if the
-// drain immediately starts a chained auction, the subsequent `auctionStart`
-// in the same event batch overrides the cancel, which is correct.
 function processEventsForTimers(roomCode, events) {
   if (!events || events.length === 0) return;
-  let auctionScheduled = false;
-  let marketScheduled = false;
+  let auctionFinal;
+  let marketFinal;
   for (const e of events) {
     if (e.type === 'auctionStart' && e.payload?.endsAtMs) {
-      scheduleAuctionEnd(roomCode, e.payload.endsAtMs);
-      auctionScheduled = true;
+      auctionFinal = e.payload.endsAtMs;
     } else if (e.type === 'bid' && e.payload?.endsAtMs) {
-      scheduleAuctionEnd(roomCode, e.payload.endsAtMs);
-      auctionScheduled = true;
+      auctionFinal = e.payload.endsAtMs;
     } else if (e.type === 'auctionEnd') {
-      if (!auctionScheduled) cancelAuctionEnd();
+      auctionFinal = null;
     } else if (e.type === 'marketOpenStart' && e.payload?.nextTickAtMs) {
-      scheduleTimer('market', roomCode, e.payload.nextTickAtMs);
-      marketScheduled = true;
+      marketFinal = e.payload.nextTickAtMs;
     } else if (e.type === 'marketTickScheduled' && e.payload?.nextTickAtMs) {
-      scheduleTimer('market', roomCode, e.payload.nextTickAtMs);
-      marketScheduled = true;
+      marketFinal = e.payload.nextTickAtMs;
     } else if (e.type === 'marketOpenEnd') {
-      if (!marketScheduled) cancelTimer('market');
+      marketFinal = null;
     }
   }
+  if (auctionFinal === null) cancelAuctionEnd();
+  else if (typeof auctionFinal === 'number') scheduleAuctionEnd(roomCode, auctionFinal);
+  if (marketFinal === null) cancelTimer('market');
+  else if (typeof marketFinal === 'number') scheduleTimer('market', roomCode, marketFinal);
 }
 
 // ---- BROADCAST ----

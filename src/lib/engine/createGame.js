@@ -38,6 +38,7 @@ export function createInitialRoom({ code, hostPlayerToken, rngSeed }) {
     pendingTransfers: [],
     pendingJailSeizureChoice: null,
     pendingTrainTravel: null,
+    pendingCardChoice: null,
     rollOff: null,
     turnCount: 0,
     economy: createEconomyState(rngSeed),
@@ -78,6 +79,7 @@ export function newSeat({ seat, playerToken, name, tokenPiece }) {
     eventInventory: { getOutOfJailFree: 0, avoidJail: 0 },
     tempEffects: [],
     loanTurnResponded: true,
+    mortgageTurnResponded: true,
     pendingLoanOffer: null,
     lastDrawnEventCard: null,
     drewEventCardThisTurn: false,
@@ -133,6 +135,7 @@ function hydrateSeat(s) {
   }
   if (!Array.isArray(s.tempEffects)) s.tempEffects = [];
   if (typeof s.loanTurnResponded !== 'boolean') s.loanTurnResponded = true;
+  if (typeof s.mortgageTurnResponded !== 'boolean') s.mortgageTurnResponded = true;
   if (s.pendingLoanOffer === undefined) s.pendingLoanOffer = null;
   if (s.lastDrawnEventCard === undefined) s.lastDrawnEventCard = null;
   if (typeof s.drewEventCardThisTurn !== 'boolean') s.drewEventCardThisTurn = false;

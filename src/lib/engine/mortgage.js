@@ -1,5 +1,6 @@
 import { BOARD, isOwnable } from '../shared/board.js';
 import { COLOR_GROUPS } from '../shared/constants.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 import {
   clampCreditScore,
   getTierByScore,
@@ -67,6 +68,8 @@ export function calcMortgageOffer(seat, propertyIndex, term, downPaymentPct, sta
   const reserveRate = typeof opts.reserveRate === 'number' ? opts.reserveRate : 0;
   const dpDiscount = downPaymentDiscount(downPaymentPct);
   const ptr = Math.max(0, Math.round((baseRate + reserveRate - dpDiscount) * 10000) / 10000);
+  const downPaymentAmount = Math.round(space.mortgageValue * downPaymentPct * 100) / 100;
+  if ((seat?.cash ?? 0) < downPaymentAmount) return { error: 'INSUFFICIENT_FUNDS_FOR_DOWN_PAYMENT' };
   const principal = Math.round(space.mortgageValue * (1 - downPaymentPct) * 100) / 100;
   const totalDebt = Math.round(principal * (1 + ptr * term) * 100) / 100;
   const installment = Math.round((totalDebt / term) * 100) / 100;
@@ -76,6 +79,7 @@ export function calcMortgageOffer(seat, propertyIndex, term, downPaymentPct, sta
     propertyIndex,
     term,
     downPaymentPct,
+    downPaymentAmount,
     ptr,
     principal,
     totalDebt,
@@ -96,6 +100,7 @@ export function requestMortgageLoan(state, seatIndex, propertyIndex, term, downP
     propertyIndex,
     term,
     downPaymentPct,
+    downPaymentAmount: offer.downPaymentAmount,
     ptr: offer.ptr,
     ptrAtIssue: offer.ptr,
     reserveRateAtIssue: offer.reserveRateAtIssue,
@@ -110,7 +115,7 @@ export function requestMortgageLoan(state, seatIndex, propertyIndex, term, downP
     creditCreditedThisTurn: false
   };
   seat.mortgageLoans.push(loan);
-  seat.cash = Math.round((seat.cash + offer.principal) * 100) / 100;
+  seat.cash = Math.round((seat.cash + offer.principal - offer.downPaymentAmount) * 100) / 100;
   state.properties[propertyIndex].mortgaged = true;
   return { ok: true, loan };
 }
@@ -199,7 +204,7 @@ export function canSellPropertyToBank(state, seatIndex, spaceIndex) {
       if (state.properties[i].houses > 0) return { ok: false, error: 'GROUP_HAS_HOUSES' };
     }
   }
-  return { ok: true, payout: space.mortgageValue };
+  return { ok: true, payout: inflatedPrice(state, space.mortgageValue) };
 }
 
 export function sellPropertyToBank(state, seatIndex, spaceIndex) {
@@ -208,9 +213,10 @@ export function sellPropertyToBank(state, seatIndex, spaceIndex) {
   const space = BOARD[spaceIndex];
   const seat = state.seats[seatIndex];
   const prop = state.properties[spaceIndex];
+  const payout = inflatedPrice(state, space.mortgageValue);
   prop.ownerSeat = null;
   prop.mortgaged = false;
   prop.houses = 0;
-  seat.cash += space.mortgageValue;
-  return { ok: true, payout: space.mortgageValue };
+  seat.cash = Math.round((seat.cash + payout) * 100) / 100;
+  return { ok: true, payout };
 }

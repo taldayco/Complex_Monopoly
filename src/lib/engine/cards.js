@@ -15,6 +15,7 @@ export function cardById(deckName, id) {
 export function drawCard(state, deckName, rng) {
   const deck = state[deckName];
   if (deck.deck.length === 0) {
+    if (deck.discard.length === 0) return { card: null, id: null };
     deck.deck = shuffle(deck.discard, rng);
     deck.discard = [];
   }

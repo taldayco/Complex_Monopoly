@@ -203,3 +203,60 @@ test('reducer requestMortgageLoan action plumbs through', () => {
   assert.equal(s.seats[0].mortgageLoans.length, 1);
   assert.equal(s.properties[39].mortgaged, true);
 });
+
+test('mortgage offer exposes downPaymentAmount = mortgageValue × downPaymentPct', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 39);
+  room.seats[0].creditScore = 720;
+  const space = BOARD[39];
+  const o0 = calcMortgageOffer(room.seats[0], 39, 5, 0, room);
+  assert.equal(o0.downPaymentAmount, 0);
+  const o25 = calcMortgageOffer(room.seats[0], 39, 5, 0.25, room);
+  assert.equal(o25.downPaymentAmount, Math.round(space.mortgageValue * 0.25 * 100) / 100);
+  const o50 = calcMortgageOffer(room.seats[0], 39, 5, 0.50, room);
+  assert.equal(o50.downPaymentAmount, Math.round(space.mortgageValue * 0.50 * 100) / 100);
+});
+
+test('requestMortgageLoan with down payment debits the down payment from cash', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 39);
+  room.seats[0].creditScore = 720;
+  const cashBefore = room.seats[0].cash;
+  const space = BOARD[39];
+  const r = requestMortgageLoan(room, 0, 39, 5, 0.25);
+  assert.equal(r.ok, true);
+  const dp = Math.round(space.mortgageValue * 0.25 * 100) / 100;
+  const principal = Math.round(space.mortgageValue * 0.75 * 100) / 100;
+  assert.equal(room.seats[0].cash, Math.round((cashBefore + principal - dp) * 100) / 100);
+  assert.equal(room.seats[0].mortgageLoans[0].downPaymentAmount, dp);
+});
+
+test('calcMortgageOffer rejects when seat cannot afford the down payment', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 39);
+  room.seats[0].creditScore = 720;
+  const space = BOARD[39];
+  room.seats[0].cash = Math.round(space.mortgageValue * 0.25 * 100) / 100 - 1;
+  const r = calcMortgageOffer(room.seats[0], 39, 5, 0.25, room);
+  assert.equal(r.error, 'INSUFFICIENT_FUNDS_FOR_DOWN_PAYMENT');
+});
+
+test('requestMortgageLoan rejects when seat cannot afford the down payment', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 39);
+  room.seats[0].creditScore = 720;
+  room.seats[0].cash = 1;
+  const r = requestMortgageLoan(room, 0, 39, 5, 0.50);
+  assert.equal(r.error, 'INSUFFICIENT_FUNDS_FOR_DOWN_PAYMENT');
+  assert.equal(room.seats[0].mortgageLoans?.length ?? 0, 0);
+  assert.equal(room.properties[39].mortgaged, false);
+});
+
+test('rollDice is blocked while a mortgage installment is due (mortgageTurnResponded=false)', () => {
+  let s = makeRoom(2);
+  s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
+  s.seats[0].mortgageTurnResponded = false;
+  const r = reducer(s, { type: 'rollDice', seat: 0 }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'MORTGAGE_DUE');
+});

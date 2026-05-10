@@ -3,6 +3,7 @@ import { ownedBy, activeSeats } from './selectors.js';
 import { BANKRUPTCY_FLOOR } from '../shared/reserve/loanCatalog.js';
 import { VOLATILE_STOCK_ORDER, FP500_SYMBOL } from '../shared/reserve/stockCatalog.js';
 import { sellShares } from './reserve/stocks.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 
 // When a player declares bankruptcy:
 //   - If owed to another player: transfer all assets (cash, properties incl. mortgaged, jail-free cards).
@@ -17,19 +18,17 @@ export function liquidateBuildings(state, seatIndex) {
     const space = BOARD[idx];
     const prop = state.properties[idx];
     if (prop.houses > 0 && space.houseCost) {
-      const refund = Math.floor((space.houseCost * prop.houses) / 2);
-      totalRefund += refund;
-      // Return houses/hotels to bank.
+      const refund = Math.round(inflatedPrice(state, space.houseCost) * prop.houses * 50) / 100;
+      totalRefund = Math.round((totalRefund + refund) * 100) / 100;
       if (prop.houses === 5) {
         state.bank.hotelsAvailable += 1;
-        // No need to return houses since hotel was 1 hotel
       } else {
         state.bank.housesAvailable += prop.houses;
       }
       prop.houses = 0;
     }
   }
-  state.seats[seatIndex].cash += totalRefund;
+  state.seats[seatIndex].cash = Math.round((state.seats[seatIndex].cash + totalRefund) * 100) / 100;
   return totalRefund;
 }
 
@@ -38,7 +37,7 @@ export function transferToCreditor(state, debtorSeat, creditorSeat) {
   const debtor = state.seats[debtorSeat];
   const creditor = state.seats[creditorSeat];
 
-  creditor.cash += debtor.cash;
+  creditor.cash = Math.round((creditor.cash + debtor.cash) * 100) / 100;
   debtor.cash = 0;
 
   for (const idx of ownedBy(state, debtorSeat)) {
@@ -63,7 +62,6 @@ export function returnToBank(state, debtorSeat) {
     state.properties[idx].ownerSeat = null;
     state.properties[idx].mortgaged = false;
   }
-  // Jail-free cards return to the bottom of their respective decks.
   if (debtor.getOutOfJailFreeChance) {
     state.chance.discard.push('CH08');
     debtor.getOutOfJailFreeChance = false;
@@ -74,6 +72,39 @@ export function returnToBank(state, debtorSeat) {
   }
   debtor.cash = 0;
   debtor.bankrupt = true;
+  clearPendingsForSeat(state, debtorSeat);
+}
+
+function clearPendingsForSeat(state, debtorSeat) {
+  if (Array.isArray(state.pendingTransfers)) {
+    state.pendingTransfers = state.pendingTransfers.filter(
+      (t) => t.fromSeat !== debtorSeat && t.toSeat !== debtorSeat
+    );
+  }
+  if (state.pendingTrainTravel?.seat === debtorSeat) {
+    state.pendingTrainTravel = null;
+  }
+  if (state.pendingJailSeizureChoice?.seat === debtorSeat) {
+    state.pendingJailSeizureChoice = null;
+  }
+  if (state.pendingCardChoice?.seat === debtorSeat) {
+    state.pendingCardChoice = null;
+  }
+  if (Array.isArray(state.pendingAuctions)) {
+    state.pendingAuctions = state.pendingAuctions.filter(
+      (a) => a.declinedBy !== debtorSeat
+    );
+  }
+  const pa = state.pendingAction;
+  if (pa) {
+    if (pa.type === 'buyDecision' && pa.seat === debtorSeat) state.pendingAction = null;
+    else if (pa.type === 'auction' && pa.highBidder === debtorSeat) {
+      pa.highBidder = null;
+      pa.currentBid = 0;
+    }
+    else if (pa.type === 'settleDebt' && pa.debtorSeat === debtorSeat) state.pendingAction = null;
+    else if (pa.type === 'trade' && (pa.fromSeat === debtorSeat || pa.toSeat === debtorSeat)) state.pendingAction = null;
+  }
 }
 
 function totalDebt(seat) {
@@ -128,8 +159,8 @@ function liquidateAllBuildingsForSeat(state, seatIndex) {
     const space = BOARD[idx];
     const prop = state.properties[idx];
     if (prop.houses > 0 && space.houseCost) {
-      const refund = Math.floor((space.houseCost * prop.houses) / 2);
-      proceeds += refund;
+      const refund = Math.round(inflatedPrice(state, space.houseCost) * prop.houses * 50) / 100;
+      proceeds = Math.round((proceeds + refund) * 100) / 100;
       if (prop.houses === 5) {
         state.bank.hotelsAvailable += 1;
       } else {

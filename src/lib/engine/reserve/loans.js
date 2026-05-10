@@ -2,6 +2,7 @@ import {
   calcLoanOptions,
   calcMaxStandardLoan,
   clampCreditScore,
+  effectiveTier,
   LOAN_TERMS,
   STANDARD_LOAN_MIN_PRINCIPAL,
   STANDARD_LOANS_PER_TURN,
@@ -14,6 +15,7 @@ import {
   getPtrDiscountFor,
   getFirstInstallmentCoverageFor
 } from '../../shared/reserve/cardCatalog.js';
+import { hasTempEffect } from './eventCards.js';
 
 let LOAN_ID_COUNTER = 0;
 
@@ -35,31 +37,51 @@ export function requestLoanOffer(seat, principal, roll, opts = {}) {
   if ((seat.standardLoansThisTurn ?? 0) >= STANDARD_LOANS_PER_TURN) {
     return { error: 'LOANS_PER_TURN_EXCEEDED' };
   }
+  const tier = effectiveTier(seat);
+  if (tier.name === 'Fair' && hasTempEffect(seat, 'fairCreditBlocked')) {
+    return { error: 'CREDIT_CRUNCH_BLOCKED' };
+  }
   const score = seat.creditScore ?? 0;
   const cardDiscount = getPtrDiscountFor(seat);
   const offer = calcLoanOptions(score, principal, roll, {
     reserveRate: opts.reserveRate,
     boardwalkDiscount: opts.boardwalkDiscount,
-    tempRateDiscount: (opts.tempRateDiscount ?? 0) + cardDiscount
+    tempRateDiscount: (opts.tempRateDiscount ?? 0) + cardDiscount,
+    tierNameOverride: tier.name
   });
   if (!offer) return { error: 'NOT_ELIGIBLE' };
   const cardLineBonus = getCardLineBonusFor(seat);
+  let lineMultiplier = 1;
+  if (hasTempEffect(seat, 'doubleMaxLine')) lineMultiplier *= 2;
+  if (hasTempEffect(seat, 'maxLoanHalved')) lineMultiplier *= 0.5;
   const maxLine = calcMaxStandardLoan(seat, {
     cardLineBonus,
-    tempBoost: opts.tempLineBoost ?? 0
+    lineMultiplier
   });
   if (maxLine < STANDARD_LOAN_MIN_PRINCIPAL) return { error: 'BELOW_LINE_FLOOR' };
   if (principal > maxLine) return { error: 'EXCEEDS_MAX_LINE' };
+  let zeroInterestApplied = false;
+  let options = offer.options;
+  if (hasTempEffect(seat, 'zeroInterestNextLoan')) {
+    options = options.map((o) => ({
+      term: o.term,
+      ptr: 0,
+      totalDebt: Math.round(principal * 100) / 100,
+      installment: Math.round((principal / o.term) * 100) / 100
+    }));
+    zeroInterestApplied = true;
+  }
   seat.pendingLoanOffer = {
     principal: Math.round(principal * 100) / 100,
     roll,
     tier: offer.tier.name,
     maxLine,
     ptrDiscount: cardDiscount,
+    zeroInterestApplied,
     bank: opts.bank ?? 'mmcu',
     reserveRateAtOffer: typeof opts.reserveRate === 'number' ? opts.reserveRate : 0,
     boardwalkDiscount: typeof opts.boardwalkDiscount === 'number' ? opts.boardwalkDiscount : 0,
-    options: offer.options
+    options
   };
   return { ok: true, offer: seat.pendingLoanOffer };
 }
@@ -93,6 +115,10 @@ export function acceptLoanOffer(seat, term, now = Date.now()) {
   seat.creditScore = clampCreditScore((seat.creditScore ?? 720) - STANDARD_LOAN_APPLY_CREDIT_PENALTY);
   seat.standardLoansThisTurn = (seat.standardLoansThisTurn ?? 0) + 1;
   seat.pendingLoanOffer = null;
+  if (offer.zeroInterestApplied && Array.isArray(seat.tempEffects)) {
+    const i = seat.tempEffects.findIndex((e) => e?.effectId === 'zeroInterestNextLoan');
+    if (i >= 0) seat.tempEffects.splice(i, 1);
+  }
   return { ok: true, loan };
 }
 

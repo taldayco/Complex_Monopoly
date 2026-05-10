@@ -367,3 +367,55 @@ test('hydrateRoom backfills balance: 0 on legacy creditCards loaded from disk', 
   hydrateRoom(s);
   assert.equal(s.seats[0].creditCards[0].balance, 0);
 });
+
+test('applyTurnStartCardFees force-charges fee to balance when seat lacks cash but has balance', async () => {
+  const { applyTurnStartCardFees } = await import('../reserve/cards.js');
+  const seat = {
+    seat: 0,
+    cash: 0,
+    creditScore: 720,
+    creditCards: [{
+      id: 'CC-test',
+      cardId: 'fakeCard',
+      status: 'active',
+      balance: 200
+    }]
+  };
+  const { CARD_CATALOG } = await import('../../shared/reserve/cardCatalog.js');
+  const original = CARD_CATALOG.fakeCard;
+  CARD_CATALOG.fakeCard = { id: 'fakeCard', rotatingFee: 50, missedPaymentCreditPenalty: 8, bank: 'mmcu' };
+  try {
+    const events = applyTurnStartCardFees(seat);
+    assert.equal(seat.creditCards[0].status, 'active');
+    assert.equal(seat.creditCards[0].balance, 250);
+    assert.equal(events[0].action, 'addedToBalance');
+    assert.equal(events[0].fee, 50);
+  } finally {
+    if (original) CARD_CATALOG.fakeCard = original;
+    else delete CARD_CATALOG.fakeCard;
+  }
+});
+
+test('applyTurnStartCardFees still auto-cancels when balance is zero (no debt to forgive)', async () => {
+  const { applyTurnStartCardFees } = await import('../reserve/cards.js');
+  const seat = {
+    seat: 0,
+    cash: 0,
+    creditScore: 720,
+    creditCards: [{
+      id: 'CC-test',
+      cardId: 'fakeCard2',
+      status: 'active',
+      balance: 0
+    }]
+  };
+  const { CARD_CATALOG } = await import('../../shared/reserve/cardCatalog.js');
+  CARD_CATALOG.fakeCard2 = { id: 'fakeCard2', rotatingFee: 50, bank: 'mmcu' };
+  try {
+    const events = applyTurnStartCardFees(seat);
+    assert.equal(seat.creditCards[0].status, 'cancelled');
+    assert.equal(events[0].action, 'autoCancelled');
+  } finally {
+    delete CARD_CATALOG.fakeCard2;
+  }
+});

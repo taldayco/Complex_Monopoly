@@ -67,7 +67,7 @@ export function settle(state, auction) {
     if (seat.cash < auction.currentBid) {
       return { soldTo: null, price: 0, settled: true };
     }
-    seat.cash -= auction.currentBid;
+    seat.cash = Math.round((seat.cash - auction.currentBid) * 100) / 100;
     state.properties[auction.spaceIndex].ownerSeat = auction.highBidder;
     return { soldTo: auction.highBidder, price: auction.currentBid, settled: true };
   }

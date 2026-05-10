@@ -48,6 +48,26 @@ test('rent inflates with the live factor', () => {
   assert.equal(rent, 70);
 });
 
+test('non-integer inflated rent settles without float drift', async () => {
+  const { reducer } = await import('../reducer.js');
+  let s = makeRoom(2, { cash: 1000 });
+  s.economy.inflationFactor = 1.21;
+  giveProperty(s, 1, 1);
+  s.seats[0].position = 0;
+  s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
+  const rngForOne = (() => { let i = 0; return () => i++ === 0 ? 0.0 : 0.5; })();
+  const r = reducer(s, { type: 'rollDice', seat: 0 }, { rng: rngForOne });
+  assert.equal(r.ok, true);
+  const debtor = r.state.seats[0];
+  const creditor = r.state.seats[1];
+  const sumIsInteger = Number.isInteger(Math.round((debtor.cash + creditor.cash) * 100));
+  assert.equal(sumIsInteger, true);
+  const debtorCents = Math.round(debtor.cash * 100);
+  const creditorCents = Math.round(creditor.cash * 100);
+  assert.equal(debtorCents, Math.round(debtor.cash * 100));
+  assert.equal(creditorCents, Math.round(creditor.cash * 100));
+});
+
 
 test('canBuyHouse cost reflects inflation', () => {
   let s = makeRoom(2);
@@ -59,6 +79,42 @@ test('canBuyHouse cost reflects inflation', () => {
   assert.equal(r.ok, true);
   assert.equal(r.cost, 300);
   assert.equal(r.listedCost, 200);
+});
+
+test('sellHouse refund reflects inflation as a float (50% of inflated houseCost)', async () => {
+  const { sellHouse } = await import('../building.js');
+  let s = makeRoom(2);
+  s.economy.inflationFactor = 1.5;
+  giveProperty(s, 0, 39, { houses: 1 });
+  s.seats[0].cash = 0;
+  const r = sellHouse(s, 0, 39);
+  assert.equal(r.ok, true);
+  assert.equal(r.refund, 150);
+  assert.equal(s.seats[0].cash, 150);
+});
+
+test('sellHouse refund yields cents at non-clean inflation', async () => {
+  const { sellHouse } = await import('../building.js');
+  let s = makeRoom(2);
+  s.economy.inflationFactor = 1.21;
+  giveProperty(s, 0, 39, { houses: 1 });
+  s.seats[0].cash = 0;
+  const r = sellHouse(s, 0, 39);
+  assert.equal(r.ok, true);
+  assert.equal(r.refund, 121);
+  assert.equal(s.seats[0].cash, 121);
+});
+
+test('sellPropertyToBank payout reflects inflation', async () => {
+  const { sellPropertyToBank } = await import('../mortgage.js');
+  let s = makeRoom(2);
+  s.economy.inflationFactor = 1.5;
+  giveProperty(s, 0, 39);
+  s.seats[0].cash = 0;
+  const r = sellPropertyToBank(s, 0, 39);
+  assert.equal(r.ok, true);
+  assert.equal(r.payout, 300);
+  assert.equal(s.seats[0].cash, 300);
 });
 
 

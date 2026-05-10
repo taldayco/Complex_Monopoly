@@ -1,9 +1,5 @@
 import { BOARD, isOwnable } from '../shared/board.js';
 
-// Trade offer schema:
-// { fromSeat, toSeat, offer: { cash, properties: [spaceIndex...], jailFreeChance, jailFreeCommunity },
-//   request: same shape }
-
 export function validateTrade(state, trade) {
   const a = state.seats[trade.fromSeat];
   const b = state.seats[trade.toSeat];
@@ -18,6 +14,7 @@ export function validateTrade(state, trade) {
       const prop = state.properties[idx];
       if (prop.ownerSeat !== seat.seat) return 'NOT_OWNER';
       if (prop.houses > 0) return 'HAS_HOUSES';
+      if (prop.mortgaged) return 'MORTGAGED';
     }
     if (side.jailFreeChance && !seat.getOutOfJailFreeChance) return 'NO_JAIL_CARD';
     if (side.jailFreeCommunity && !seat.getOutOfJailFreeCommunity) return 'NO_JAIL_CARD';
@@ -36,11 +33,10 @@ export function executeTrade(state, trade) {
   const a = state.seats[trade.fromSeat];
   const b = state.seats[trade.toSeat];
 
-  // Atomic swap. Cash diff in one shot.
   const aGivesCash = trade.offer.cash ?? 0;
   const bGivesCash = trade.request.cash ?? 0;
-  a.cash += bGivesCash - aGivesCash;
-  b.cash += aGivesCash - bGivesCash;
+  a.cash = Math.round((a.cash + bGivesCash - aGivesCash) * 100) / 100;
+  b.cash = Math.round((b.cash + aGivesCash - bGivesCash) * 100) / 100;
 
   for (const idx of trade.offer.properties ?? []) {
     state.properties[idx].ownerSeat = b.seat;

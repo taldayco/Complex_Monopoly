@@ -99,3 +99,50 @@ test('reducer auto-checks for credit bankruptcy after every action', () => {
   s = step(s, { type: 'skipLoanInstallment', seat: 0, loanId: 'L1' });
   assert.equal(s.seats[0].bankrupt, true);
 });
+
+test('turn auto-advances when active seat is eliminated mid-turn', () => {
+  let s = makeRoom(3);
+  s.turn = { seat: 0, phase: 'preRoll', lastRoll: null, lastRollWasDoubles: false, doublesCount: 0 };
+  s.seats[0].creditScore = 351;
+  s.seats[0].cash = 0;
+  s.seats[0].stockLots = {};
+  s.seats[0].loans = [
+    { id: 'L1', status: 'active', balance: 5000, ptr: 0.05, term: 5, paymentsMade: 0, principal: 5000, totalDebt: 5000, installment: 1000, dueThisTurn: true, creditCreditedThisTurn: false }
+  ];
+  s.seats[0].loanTurnResponded = false;
+  s = step(s, { type: 'skipLoanInstallment', seat: 0, loanId: 'L1' });
+  assert.equal(s.seats[0].bankrupt, true);
+  assert.equal(s.turn.seat, 1);
+});
+
+test('returnToBank clears eliminated seat from pendingTransfers', async () => {
+  const { returnToBank } = await import('../bankruptcy.js');
+  const s = makeRoom(3);
+  s.pendingTransfers = [
+    { id: 'T1', fromSeat: 0, toSeat: 1, amount: 50, status: 'pending' },
+    { id: 'T2', fromSeat: 2, toSeat: 0, amount: 30, status: 'pending' },
+    { id: 'T3', fromSeat: 1, toSeat: 2, amount: 10, status: 'pending' }
+  ];
+  returnToBank(s, 0);
+  assert.equal(s.pendingTransfers.length, 1);
+  assert.equal(s.pendingTransfers[0].id, 'T3');
+});
+
+test('returnToBank clears pendingTrainTravel and pendingJailSeizureChoice for the seat', async () => {
+  const { returnToBank } = await import('../bankruptcy.js');
+  const s = makeRoom(2);
+  s.pendingTrainTravel = { seat: 0, fromIdx: 5, choices: [15, 25] };
+  s.pendingJailSeizureChoice = { seat: 0, choices: [1, 3] };
+  returnToBank(s, 0);
+  assert.equal(s.pendingTrainTravel, null);
+  assert.equal(s.pendingJailSeizureChoice, null);
+});
+
+test('marketOpenTick rejects when game is finished (caught by NOT_PLAYING top-level guard)', () => {
+  let s = makeRoom(2);
+  s.phase = 'finished';
+  s.marketOpen = { active: true, ticksFired: 0, totalTicks: 34, scheduledFlips: [] };
+  const r = reducer(s, { type: 'marketOpenTick', _server: true }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'NOT_PLAYING');
+});

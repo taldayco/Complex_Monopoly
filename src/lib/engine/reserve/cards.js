@@ -10,6 +10,7 @@ import {
   CREDIT_LINE_INCREASE_PENALTY
 } from '../../shared/reserve/cardCatalog.js';
 import { clampCreditScore } from '../../shared/reserve/loanCatalog.js';
+import { hasTempEffect } from './eventCards.js';
 
 let CARD_ID_COUNTER = 0;
 function genInstanceId(seat, cardId) {
@@ -87,15 +88,23 @@ export function cancelCard(seat, instanceId) {
 
 export function applyTurnStartCardFees(seat) {
   const events = [];
+  if (seat?.inJail) return events;
+  const halfFees = hasTempEffect(seat, 'halfCardFees');
   for (const inst of seat.creditCards) {
     if (inst.status !== 'active') continue;
     const card = CARD_CATALOG[inst.cardId];
     if (!card) continue;
-    const fee = card.rotatingFee ?? 0;
-    if (fee <= 0) continue;
+    const baseFee = card.rotatingFee ?? 0;
+    if (baseFee <= 0) continue;
+    const fee = halfFees ? Math.round(baseFee * 50) / 100 : baseFee;
     if (seat.cash >= fee) {
       seat.cash = Math.round((seat.cash - fee) * 100) / 100;
       events.push({ cardId: inst.cardId, fee, action: 'charged' });
+    } else if ((inst.balance ?? 0) > 0) {
+      inst.balance = Math.round(((inst.balance ?? 0) + fee) * 100) / 100;
+      const penalty = getMissedPaymentPenaltyForCard(inst.cardId);
+      seat.creditScore = clampCreditScore((seat.creditScore ?? 720) - penalty);
+      events.push({ cardId: inst.cardId, fee, action: 'addedToBalance', penalty, balance: inst.balance });
     } else {
       inst.status = 'cancelled';
       inst.cancelledAt = Date.now();

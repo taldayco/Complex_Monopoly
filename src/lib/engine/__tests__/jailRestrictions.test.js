@@ -165,3 +165,15 @@ test('seizePropertyToBank clears mortgage and houses', () => {
   assert.equal(room.properties[1].mortgaged, false);
   assert.equal(room.properties[1].houses, 0);
 });
+
+test('endTurn is blocked while pendingJailSeizureChoice is unresolved', () => {
+  let s = makeRoom(2);
+  giveProperty(s, 0, 1);
+  giveProperty(s, 0, 3);
+  sendToJailWithSeizure(s, 0);
+  assert.ok(s.pendingJailSeizureChoice);
+  s.turn.phase = 'endable';
+  const r = reducer(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'BLOCKED_BY_JAIL_SEIZURE');
+});

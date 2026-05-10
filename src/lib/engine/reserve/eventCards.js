@@ -13,7 +13,7 @@ import {
 } from '../../shared/reserve/stockCatalog.js';
 import { clampCreditScore } from '../../shared/reserve/loanCatalog.js';
 import { COLOR_GROUPS } from '../../shared/constants.js';
-import { recalcFP500 } from './stocks.js';
+import { recalcFP500, buyShares, sellShares } from './stocks.js';
 
 let EFFECT_ID_COUNTER = 0;
 
@@ -168,6 +168,12 @@ function applyEffect(state, seat, eff, ctx) {
       return applyGrantInventory(seat, eff.item, eff.qty);
     case 'wrongfullyAccused':
       return applyWrongfullyAccused(seat);
+    case 'financialCrisis':
+      return applyFinancialCrisis(state, eff.inflationFreezeTurns, eff.interestFreezeTurns);
+    case 'fixedTradeStock':
+      return applyFixedTradeStock(state, seat, eff.symbol, eff.qty, eff.price, eff.direction);
+    case 'cardChoice':
+      return emitCardChoice(state, seat, eff);
     default:
       return { skipped: true, reason: 'UNKNOWN_EFFECT' };
   }
@@ -525,6 +531,79 @@ function applyWrongfullyAccused(seat) {
     return { released: true, paid: 200 };
   }
   return applyGrantInventory(seat, 'wrongfullyAccused', 1);
+}
+
+function applyFixedTradeStock(state, seat, symbol, qty, fixedPrice, direction) {
+  if (!state.stocks?.market?.[symbol]) return { skipped: true, reason: 'UNKNOWN_STOCK' };
+  const livePrice = state.stocks.market[symbol].price;
+  state.stocks.market[symbol].price = fixedPrice;
+  let result;
+  try {
+    if (direction === 'buy') result = buyShares(seat, state.stocks, symbol, qty);
+    else result = sellShares(seat, state.stocks, symbol, qty);
+  } finally {
+    state.stocks.market[symbol].price = livePrice;
+  }
+  if (!result?.ok) return { skipped: true, reason: result?.error ?? 'TRADE_FAILED' };
+  return { direction, symbol, qty, fixedPrice, ...result };
+}
+
+function emitCardChoice(state, seat, eff) {
+  let options = [];
+  if (eff.kind === 'cardChoice' && eff.choiceKind === 'stockUpgrade') {
+    options = VOLATILE_STOCK_ORDER.slice();
+  } else if (eff.choiceKind === 'insiderTip') {
+    options = VOLATILE_STOCK_ORDER.slice();
+  } else if (eff.choiceKind === 'rateDiscount' || eff.choiceKind === 'refinance') {
+    options = (seat.loans ?? [])
+      .filter((l) => l?.status === 'active' && l.balance > 0)
+      .map((l) => l.id);
+    if (options.length === 0) return { skipped: true, reason: 'NO_ACTIVE_LOANS' };
+  } else {
+    return { skipped: true, reason: 'UNKNOWN_CHOICE_KIND' };
+  }
+  state.pendingCardChoice = {
+    seat: seat.seat,
+    kind: eff.choiceKind,
+    amount: typeof eff.amount === 'number' ? eff.amount : 0,
+    options
+  };
+  return { kind: eff.choiceKind, options };
+}
+
+function applyFinancialCrisis(state, inflationFreezeTurns = 10, interestFreezeTurns = 8) {
+  if (!state.economy) return { skipped: true };
+  state.economy.inflationFactor = 1;
+  if (!Array.isArray(state.economy.tempEffects)) state.economy.tempEffects = [];
+  const turnCount = state.turnCount ?? 0;
+  state.economy.tempEffects.push({
+    kind: 'inflationFreeze',
+    expiresAtTurn: turnCount + inflationFreezeTurns
+  });
+  state.economy.tempEffects.push({
+    kind: 'interestFreeze',
+    expiresAtTurn: turnCount + interestFreezeTurns
+  });
+  const FDIC_CAP = 5000;
+  const losses = [];
+  for (const s of state.seats ?? []) {
+    if (s.bankrupt) continue;
+    for (const bank of ['mmcu', 'boardwalk']) {
+      const acct = s.bankAccounts?.[bank];
+      if (!acct?.open) continue;
+      if ((acct.balance ?? 0) > FDIC_CAP) {
+        const lost = Math.round((acct.balance - FDIC_CAP) * 100) / 100;
+        acct.balance = FDIC_CAP;
+        losses.push({ seat: s.seat, bank, lost });
+      }
+    }
+  }
+  return {
+    inflationReset: 1,
+    inflationFreezeUntil: turnCount + inflationFreezeTurns,
+    interestFreezeUntil: turnCount + interestFreezeTurns,
+    losses
+  };
 }
 
 // ---------- TEMP-EFFECT LIFECYCLE ----------

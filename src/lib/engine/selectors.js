@@ -1,5 +1,6 @@
 import { BOARD, isOwnable } from '../shared/board.js';
 import { COLOR_GROUPS, RAILROAD_INDICES, UTILITY_INDICES } from '../shared/constants.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 
 export function activeSeats(state) {
   return state.seats.filter((s) => !s.bankrupt);
@@ -64,12 +65,13 @@ export function netWorth(state, seatIndex) {
     const space = BOARD[i];
     const prop = state.properties[i];
     if (prop.mortgaged) {
-      total += space.mortgageValue ?? 0;
+      total = Math.round((total + (space.mortgageValue ?? 0)) * 100) / 100;
     } else {
-      total += space.price ?? 0;
+      total = Math.round((total + inflatedPrice(state, space.price ?? 0)) * 100) / 100;
     }
     if (prop.houses > 0 && space.houseCost) {
-      total += Math.floor((space.houseCost * prop.houses) / 2);
+      const buildingValue = Math.round(inflatedPrice(state, space.houseCost) * prop.houses * 50) / 100;
+      total = Math.round((total + buildingValue) * 100) / 100;
     }
   }
   return total;
