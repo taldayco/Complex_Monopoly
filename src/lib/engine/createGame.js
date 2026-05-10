@@ -3,14 +3,15 @@ import {
   STARTING_CASH,
   TOTAL_HOUSES,
   TOTAL_HOTELS,
-  STARTING_CREDIT_SCORE,
-  HYSA_BASE_RATE
+  STARTING_CREDIT_SCORE
 } from '../shared/constants.js';
 import { CHANCE_CARDS } from '../shared/chance.js';
 import { COMMUNITY_CHEST_CARDS } from '../shared/communityChest.js';
 import { isOwnable } from '../shared/board.js';
 import { createStocksState, hydrateStocks } from './reserve/stocks.js';
 import { createReserveDeckState, hydrateReserveDecks } from './reserve/eventCards.js';
+import { createEconomyState, hydrateEconomy } from './reserve/economy.js';
+import { ensureSeatBankAccounts } from './reserve/banking.js';
 
 export function createInitialRoom({ code, hostPlayerToken, rngSeed }) {
   return {
@@ -28,12 +29,18 @@ export function createInitialRoom({ code, hostPlayerToken, rngSeed }) {
       seat: 0,
       phase: 'preRoll',
       lastRoll: null,
+      lastRollWasDoubles: false,
       doublesCount: 0
     },
     pendingAction: null,
     pendingAuctions: [],
     pendingRequests: [],
     pendingTransfers: [],
+    pendingJailSeizureChoice: null,
+    pendingTrainTravel: null,
+    rollOff: null,
+    turnCount: 0,
+    economy: createEconomyState(rngSeed),
     stocks: createStocksState(rngSeed),
     chance: { deck: shuffleIds(CHANCE_CARDS, rngSeed, 1), discard: [] },
     communityChest: { deck: shuffleIds(COMMUNITY_CHEST_CARDS, rngSeed, 2), discard: [] },
@@ -59,40 +66,49 @@ export function newSeat({ seat, playerToken, name, tokenPiece }) {
     getOutOfJailFreeChance: false,
     getOutOfJailFreeCommunity: false,
     bankrupt: false,
-    // Reserve fields
     baseScore: STARTING_CREDIT_SCORE,
     creditScore: STARTING_CREDIT_SCORE,
     loans: [],
+    mortgageLoans: [],
+    standardLoansThisTurn: 0,
     creditCards: [],
     stockLots: {},
     stockCostBasis: {},
     transactions: [],
     eventInventory: { getOutOfJailFree: 0, avoidJail: 0 },
     tempEffects: [],
-    hysaRate: HYSA_BASE_RATE,
     loanTurnResponded: true,
     pendingLoanOffer: null,
     lastDrawnEventCard: null,
     drewEventCardThisTurn: false,
-    revealedWildcards: {}
+    revealedWildcards: {},
+    bankAccounts: {
+      mmcu: { open: false, balance: 0, openedAt: 0 },
+      boardwalk: { open: false, balance: 0, openedAt: 0 }
+    }
   };
 }
 
-// Backfill any reserve fields missing from a room loaded from disk that predates
-// the reserve overlay. Idempotent — safe to call on already-hydrated rooms.
 export function hydrateRoom(room) {
   if (!room || typeof room !== 'object') return room;
   delete room.bankerMode;
   if (!Array.isArray(room.pendingAuctions)) room.pendingAuctions = [];
   if (!Array.isArray(room.pendingRequests)) room.pendingRequests = [];
   if (!Array.isArray(room.pendingTransfers)) room.pendingTransfers = [];
-  // A server crash mid Market Open leaves stale state and no timer to tick it
-  // forward. Clear so the next landing can re-trigger cleanly.
   if (room.marketOpen !== undefined) room.marketOpen = null;
   room.stocks = hydrateStocks(room.stocks, room.rngSeed ?? 0);
+  room.economy = hydrateEconomy(room.economy, room.rngSeed ?? 0);
+  if (typeof room.turnCount !== 'number') room.turnCount = 0;
   hydrateReserveDecks(room);
   if (Array.isArray(room.seats)) {
     for (const s of room.seats) hydrateSeat(s);
+    for (const s of room.seats) {
+      if (Array.isArray(s.loans)) {
+        for (const l of s.loans) {
+          if (l && typeof l === 'object' && !l.bank) l.bank = 'mmcu';
+        }
+      }
+    }
   }
   return room;
 }
@@ -101,9 +117,13 @@ function hydrateSeat(s) {
   if (typeof s.baseScore !== 'number') s.baseScore = STARTING_CREDIT_SCORE;
   if (typeof s.creditScore !== 'number') s.creditScore = STARTING_CREDIT_SCORE;
   if (!Array.isArray(s.loans)) s.loans = [];
+  if (!Array.isArray(s.mortgageLoans)) s.mortgageLoans = [];
+  if (typeof s.standardLoansThisTurn !== 'number') s.standardLoansThisTurn = 0;
   if (!Array.isArray(s.creditCards)) s.creditCards = [];
   for (const c of s.creditCards) {
     if (typeof c.balance !== 'number') c.balance = 0;
+    if (typeof c.openedAtTurn !== 'number') c.openedAtTurn = 0;
+    if (typeof c.autopay !== 'boolean') c.autopay = true;
   }
   if (!s.stockLots || typeof s.stockLots !== 'object') s.stockLots = {};
   if (!s.stockCostBasis || typeof s.stockCostBasis !== 'object') s.stockCostBasis = {};
@@ -112,12 +132,13 @@ function hydrateSeat(s) {
     s.eventInventory = { getOutOfJailFree: 0, avoidJail: 0 };
   }
   if (!Array.isArray(s.tempEffects)) s.tempEffects = [];
-  if (typeof s.hysaRate !== 'number') s.hysaRate = HYSA_BASE_RATE;
   if (typeof s.loanTurnResponded !== 'boolean') s.loanTurnResponded = true;
   if (s.pendingLoanOffer === undefined) s.pendingLoanOffer = null;
   if (s.lastDrawnEventCard === undefined) s.lastDrawnEventCard = null;
   if (typeof s.drewEventCardThisTurn !== 'boolean') s.drewEventCardThisTurn = false;
   if (!s.revealedWildcards || typeof s.revealedWildcards !== 'object') s.revealedWildcards = {};
+  delete s.hysaRate;
+  ensureSeatBankAccounts(s);
 }
 
 function makeInitialProperties() {
@@ -130,7 +151,6 @@ function makeInitialProperties() {
   return props;
 }
 
-// Deterministic Fisher-Yates using a simple LCG so we don't need to inject the rng module here.
 function shuffleIds(cards, seed, salt) {
   const ids = cards.map((c) => c.id);
   let s = (seed ^ (salt * 0x9e3779b1)) >>> 0;

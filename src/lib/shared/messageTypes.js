@@ -6,6 +6,7 @@ export const C2S = {
   LEAVE_ROOM: 'leaveRoom',
   SET_READY: 'setReady',
   START_GAME: 'startGame',
+  ROLL_FOR_ORDER: 'rollForOrder',
   ROLL_DICE: 'rollDice',
   BUY_PROPERTY: 'buyProperty',
   BUY_PROPERTY_WITH_MORTGAGE: 'buyPropertyWithMortgage',
@@ -13,8 +14,10 @@ export const C2S = {
   DECLINE_TO_BUY: 'declineToBuy',
   BID: 'bid',
   PASS_AUCTION: 'passAuction',
-  MORTGAGE: 'mortgage',
-  UNMORTGAGE: 'unmortgage',
+  REQUEST_MORTGAGE_LOAN: 'requestMortgageLoan',
+  PAY_MORTGAGE_INSTALLMENT: 'payMortgageInstallment',
+  SKIP_MORTGAGE_INSTALLMENT: 'skipMortgageInstallment',
+  PAYOFF_MORTGAGE_LOAN: 'payoffMortgageLoan',
   SELL_PROPERTY_TO_BANK: 'sellPropertyToBank',
   BUY_HOUSE: 'buyHouse',
   SELL_HOUSE: 'sellHouse',
@@ -43,6 +46,7 @@ export const C2S = {
 
   // Reserve: credit cards
   REQUEST_CREDIT_CARD: 'requestCreditCard',
+  REQUEST_CREDIT_LINE_INCREASE: 'requestCreditLineIncrease',
   BANKER_ASSIGN_CARD: 'bankerAssignCard',
   BANKER_REVOKE_CARD: 'bankerRevokeCard',
   CANCEL_CREDIT_CARD: 'cancelCreditCard',
@@ -57,6 +61,11 @@ export const C2S = {
   WIRE_TRANSFER: 'wireTransfer',
   REQUEST_TRANSFER: 'requestTransfer',
   RESPOND_TRANSFER: 'respondTransfer',
+
+  OPEN_BANK_ACCOUNT: 'openBankAccount',
+  CLOSE_BANK_ACCOUNT: 'closeBankAccount',
+  DEPOSIT_TO_BANK: 'depositToBank',
+  WITHDRAW_FROM_BANK: 'withdrawFromBank',
 
   // Reserve: banker admin
   BANKER_ADJUST_CREDIT: 'bankerAdjustCredit',

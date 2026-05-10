@@ -7,22 +7,24 @@ import {
   MAX_DOUBLES,
   CHANCE_INDICES,
   COMMUNITY_CHEST_INDICES,
-  AUCTION_MIN_BID,
   BUY_MORTGAGE_PTR,
   BUY_MORTGAGE_TERMS,
-  COLOR_GROUPS
+  COLOR_GROUPS,
+  RAILROAD_INDICES,
+  BOARD_SIZE
 } from '../shared/constants.js';
 import { advancePosition, moveTo, rollDice as rollDiceFn } from './movement.js';
 import { computeRent } from './rent.js';
 import { canBuy, buyProperty as buyPropertyFn, transferOwnership } from './purchase.js';
-import { sendToJail, attemptJailExit } from './jail.js';
+import { sendToJail, sendToJailWithSeizure, seizePropertyToBank, attemptJailExit } from './jail.js';
 import { drawCard, returnCardToDiscard } from './cards.js';
 import { canBuyHouse, buyHouse as buyHouseFn, canSellHouse, sellHouse as sellHouseFn } from './building.js';
 import {
-  canMortgage,
-  mortgage as mortgageFn,
-  canUnmortgage,
-  unmortgage as unmortgageFn,
+  requestMortgageLoan as requestMortgageLoanFn,
+  payMortgageInstallment as payMortgageInstallmentFn,
+  skipMortgageInstallment as skipMortgageInstallmentFn,
+  payoffMortgageLoan as payoffMortgageLoanFn,
+  markMortgageLoansDueAtTurnStart,
   sellPropertyToBank as sellPropertyToBankFn
 } from './mortgage.js';
 import { validateTrade, executeTrade } from './trade.js';
@@ -31,14 +33,27 @@ import {
   applyBid,
   shouldSettleEarly,
   isExpired,
-  settle as settleAuctionFn
+  settle as settleAuctionFn,
+  randomAssign as randomAssignAuctionFn,
+  AUCTION_ATTEMPT_FRACTIONS
 } from './auction.js';
 import {
   flipMarket,
   buyShares,
   sellShares
 } from './reserve/stocks.js';
-import { AUTO_FLIP_EVERY_N_TURNS } from '../shared/reserve/stockCatalog.js';
+import { flipEconomy } from './reserve/economy.js';
+import {
+  openAccount,
+  closeAccount,
+  deposit,
+  withdraw,
+  applyHysaInterestAtTurnStart,
+  eligibleForBoardwalkDiscount,
+  applyFdicDisaster
+} from './reserve/banking.js';
+import { BANKS } from '../shared/reserve/economyCatalog.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 import { getTierByScore } from '../shared/reserve/loanCatalog.js';
 import {
   rollLoanDie,
@@ -56,7 +71,8 @@ import {
   applyTurnStartCardFees,
   chargeCard,
   payCardBalance,
-  accrueCardInterest
+  accrueCardInterest,
+  requestCreditLineIncrease
 } from './reserve/cards.js';
 import {
   getRailRebateFor,
@@ -80,7 +96,6 @@ import {
   respondTransferRequest,
   cancelTransferRequest
 } from './reserve/transfers.js';
-import { applyHysaInterestAtTurnStart } from './reserve/hysa.js';
 import {
   startMarketOpen,
   applyMarketOpenTick,
@@ -90,7 +105,8 @@ import {
   liquidateBuildings,
   transferToCreditor,
   returnToBank,
-  checkGameOver
+  checkGameOver,
+  checkAndExecuteCreditBankruptcy
 } from './bankruptcy.js';
 import {
   ownedBy,
@@ -111,6 +127,18 @@ import { advanceTurn, startNewTurn } from './turn.js';
 //   { ok: true, state, events } on success
 //   { ok: false, error: string }
 export function reducer(state, action, ctx) {
+  if (state.phase === 'rollOff') {
+    if (action.type !== 'rollForOrder') return { ok: false, error: 'NOT_PLAYING' };
+    const next = structuredClone(state);
+    const events = [];
+    const log = (type, seat, payload) =>
+      events.push({ ts: Date.now(), seat: seat ?? null, type, payload: payload ?? null });
+    const result = doRollForOrder(next, action, ctx, log);
+    if (result.error) return { ok: false, error: result.error };
+    next.log.push(...events);
+    next.updatedAt = Date.now();
+    return { ok: true, state: next, events };
+  }
   if (state.phase !== 'playing') {
     return { ok: false, error: 'NOT_PLAYING' };
   }
@@ -122,17 +150,63 @@ export function reducer(state, action, ctx) {
   const result = dispatch(next, action, ctx, log);
   if (result.error) return { ok: false, error: result.error };
 
+  if (Array.isArray(next.seats)) {
+    for (let i = 0; i < next.seats.length; i++) {
+      checkAndExecuteCreditBankruptcy(next, i, ctx, log);
+    }
+  }
+
   next.log.push(...events);
   next.updatedAt = Date.now();
   return { ok: true, state: next, events };
 }
 
+const JAIL_BLOCKED_ACTIONS = new Set([
+  'buyStock',
+  'buyStockWithCard',
+  'sellStock',
+  'requestLoan',
+  'respondLoanOffer',
+  'payLoanInstallment',
+  'skipLoanInstallment',
+  'payoffLoan',
+  'requestCreditCard',
+  'requestCreditLineIncrease',
+  'cancelCreditCard',
+  'payCardBalance',
+  'requestMortgageLoan',
+  'payMortgageInstallment',
+  'skipMortgageInstallment',
+  'payoffMortgageLoan',
+  'sellPropertyToBank',
+  'openBankAccount',
+  'closeBankAccount',
+  'depositToBank',
+  'withdrawFromBank',
+  'wireTransfer',
+  'requestTransfer',
+  'respondTransfer',
+  'cancelTransfer',
+  'buyHouse',
+  'sellHouse',
+  'buyProperty',
+  'buyPropertyWithMortgage',
+  'buyPropertyWithCard',
+  'proposeTrade',
+  'respondTrade',
+  'cancelTrade'
+]);
+
 function dispatch(state, action, ctx, log) {
-  // While a Market Open window is active, block every non-trading action.
-  // Buy/sell stocks and trades stay open; the server-injected tick passes
-  // through to advance the window.
   if (state.marketOpen?.active && !MARKET_OPEN_ALLOWED_ACTIONS.has(action.type)) {
     return { error: 'MARKET_OPEN_ACTIVE' };
+  }
+  if (
+    typeof action.seat === 'number' &&
+    state.seats?.[action.seat]?.inJail &&
+    JAIL_BLOCKED_ACTIONS.has(action.type)
+  ) {
+    return { error: 'JAILED' };
   }
   switch (action.type) {
     case 'rollDice':         return doRollDice(state, action, ctx, log);
@@ -153,14 +227,21 @@ function dispatch(state, action, ctx, log) {
     case 'skipLoanInstallment': return doSkipLoanInstallment(state, action, ctx, log);
     case 'payoffLoan':       return doPayoffLoan(state, action, ctx, log);
     case 'requestCreditCard': return doRequestCreditCard(state, action, ctx, log);
+    case 'requestCreditLineIncrease': return doRequestCreditLineIncrease(state, action, ctx, log);
     case 'cancelCreditCard': return doCancelCreditCard(state, action, ctx, log);
     case 'dismissEventCard': return doDismissEventCard(state, action, ctx, log);
     case 'wireTransfer':     return doWireAction(state, action, ctx, log);
     case 'requestTransfer':  return doRequestTransferAction(state, action, ctx, log);
     case 'respondTransfer':  return doRespondTransferAction(state, action, ctx, log);
     case 'cancelTransfer':   return doCancelTransferAction(state, action, ctx, log);
-    case 'mortgage':         return doMortgage(state, action, ctx, log);
-    case 'unmortgage':       return doUnmortgage(state, action, ctx, log);
+    case 'openBankAccount':  return doOpenBankAccount(state, action, ctx, log);
+    case 'closeBankAccount': return doCloseBankAccount(state, action, ctx, log);
+    case 'depositToBank':    return doDepositToBank(state, action, ctx, log);
+    case 'withdrawFromBank': return doWithdrawFromBank(state, action, ctx, log);
+    case 'requestMortgageLoan': return doRequestMortgageLoan(state, action, ctx, log);
+    case 'payMortgageInstallment': return doPayMortgageInstallment(state, action, ctx, log);
+    case 'skipMortgageInstallment': return doSkipMortgageInstallment(state, action, ctx, log);
+    case 'payoffMortgageLoan': return doPayoffMortgageLoan(state, action, ctx, log);
     case 'sellPropertyToBank': return doSellPropertyToBank(state, action, ctx, log);
     case 'buyHouse':         return doBuyHouse(state, action, ctx, log);
     case 'sellHouse':        return doSellHouse(state, action, ctx, log);
@@ -170,6 +251,9 @@ function dispatch(state, action, ctx, log) {
     case 'useGetOutOfJail':  return doUseGetOutOfJail(state, action, ctx, log);
     case 'payJailFine':      return doPayJailFine(state, action, ctx, log);
     case 'rollForJail':      return doRollForJail(state, action, ctx, log);
+    case 'chooseJailSeizure': return doChooseJailSeizure(state, action, ctx, log);
+    case 'chooseTrainDestination': return doChooseTrainDestination(state, action, ctx, log);
+    case 'skipTrainTravel':  return doSkipTrainTravel(state, action, ctx, log);
     case 'declareBankruptcy':return doDeclareBankruptcy(state, action, ctx, log);
     case 'endTurn':          return doEndTurn(state, action, ctx, log);
     case 'skipPlayer':       return doSkipPlayer(state, action, ctx, log);
@@ -197,6 +281,56 @@ function clearStaleWildcardReveals(state, reshuffledSymbols) {
   }
 }
 
+function doRollForOrder(state, action, ctx, log) {
+  if (!state.rollOff) return { error: 'NO_ROLLOFF' };
+  if (typeof action.seat !== 'number') return { error: 'NO_SEAT' };
+  const ro = state.rollOff;
+  if (!ro.contenders.includes(action.seat)) return { error: 'NOT_CONTENDER' };
+  if (ro.rolls[action.seat] != null) return { error: 'ALREADY_ROLLED' };
+
+  const roll = rollDiceFn(ctx.rng);
+  state.rngCursor++;
+  ro.rolls[action.seat] = { d1: roll.d1, d2: roll.d2, total: roll.total };
+  log('rollForOrder', action.seat, { d1: roll.d1, d2: roll.d2, total: roll.total, round: ro.round });
+
+  const allRolled = ro.contenders.every((s) => ro.rolls[s] != null);
+  if (!allRolled) return {};
+
+  const maxTotal = Math.max(...ro.contenders.map((s) => ro.rolls[s].total));
+  const leaders = ro.contenders.filter((s) => ro.rolls[s].total === maxTotal);
+
+  if (leaders.length > 1) {
+    ro.contenders = leaders;
+    ro.rolls = {};
+    ro.round += 1;
+    log('rollOffTieReroll', null, { contenders: leaders, total: maxTotal, round: ro.round });
+    return {};
+  }
+
+  finalizeRollOff(state, leaders[0], maxTotal, log);
+  return {};
+}
+
+function finalizeRollOff(state, winnerSeat, winnerTotal, log) {
+  const lobbyOrder = state.seats.map((s) => s.seat);
+  const winnerPos = lobbyOrder.indexOf(winnerSeat);
+  const rotated = [...lobbyOrder.slice(winnerPos), ...lobbyOrder.slice(0, winnerPos)];
+
+  const oldSeatsByIdx = new Map(state.seats.map((s) => [s.seat, s]));
+  state.seats = rotated.map((oldIdx, newIdx) => ({
+    ...oldSeatsByIdx.get(oldIdx),
+    seat: newIdx
+  }));
+  state.phase = 'playing';
+  state.turn = { seat: 0, phase: 'preRoll', lastRoll: null, lastRollWasDoubles: false, doublesCount: 0 };
+  log('rollOffComplete', null, {
+    winnerOriginalSeat: winnerSeat,
+    winnerTotal,
+    order: state.seats.map((s) => ({ seat: s.seat, name: s.name, token: s.playerToken }))
+  });
+  state.rollOff = null;
+}
+
 // ---------- ROLL DICE ----------
 function doRollDice(state, action, ctx, log) {
   if (!isCurrentSeat(state, action)) return { error: 'NOT_YOUR_TURN' };
@@ -210,14 +344,16 @@ function doRollDice(state, action, ctx, log) {
   const roll = rollDiceFn(ctx.rng);
   state.rngCursor++;
   state.turn.lastRoll = [roll.d1, roll.d2];
+  state.turn.lastRollWasDoubles = roll.doubles;
 
   if (roll.doubles) {
     state.turn.doublesCount++;
     if (state.turn.doublesCount >= MAX_DOUBLES) {
-      sendToJail(seat);
+      const sj = sendToJailWithSeizure(state, action.seat);
       log('rollDice', action.seat, { d1: roll.d1, d2: roll.d2, doubles: true });
       log('threeDoubles', action.seat, null);
       log('toJail', action.seat, null);
+      if (sj.seizureRequired) log('jailSeizureRequired', action.seat, { choices: sj.choices });
       state.turn.phase = 'endable';
       return {};
     }
@@ -248,10 +384,12 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
     case 'freeParking':
       return;
 
-    case 'goToJail':
-      sendToJail(seat);
+    case 'goToJail': {
+      const r = sendToJailWithSeizure(state, seatIndex);
       log('toJail', seatIndex, null);
+      if (r.seizureRequired) log('jailSeizureRequired', seatIndex, { choices: r.choices });
       return;
+    }
 
     case 'tax': {
       // Retained as defensive dead code: the classic Income/Luxury Tax tiles
@@ -295,9 +433,8 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
     case 'utility': {
       const prop = state.properties[seat.position];
       if (prop.ownerSeat == null) {
-        // If the player can't afford the listed price, skip the buy decision
-        // and queue the property for an end-of-turn auction directly.
-        if (seat.cash < space.price) {
+        const livePrice = inflatedPrice(state, space.price);
+        if (seat.cash < livePrice) {
           state.pendingAuctions.push({
             spaceIndex: seat.position,
             declinedBy: seatIndex,
@@ -312,21 +449,19 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
             type: 'buyDecision',
             seat: seatIndex,
             spaceIndex: seat.position,
-            price: space.price
+            price: livePrice
           };
-          log('offerBuy', seatIndex, { spaceIndex: seat.position, price: space.price });
+          log('offerBuy', seatIndex, { spaceIndex: seat.position, price: livePrice });
         }
       } else if (prop.ownerSeat === seatIndex) {
-        // Own property
+        if (space.type === 'railroad') {
+          maybeQueueTrainTravel(state, seatIndex, seat.position, log);
+        }
       } else {
         const ownerSeat = state.seats[prop.ownerSeat];
-        if (ownerSeat.inJail) {
-          // Classic rule: rent still collected even if owner in jail.
-        }
-        // goRewards: bank pays the owner a flat per-landing bonus regardless
-        // of whether rent is owed (mortgaged or otherwise).
+        const ownerJailed = !!ownerSeat.inJail;
         const ownerLandingBonus = getOtherLandingBonusFor(ownerSeat);
-        if (ownerLandingBonus > 0) {
+        if (ownerLandingBonus > 0 && !ownerJailed) {
           ownerSeat.cash = Math.round((ownerSeat.cash + ownerLandingBonus) * 100) / 100;
           log('cardLandingBonus', prop.ownerSeat, {
             spaceIndex: seat.position,
@@ -334,24 +469,29 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
             landerSeat: seatIndex
           });
         }
-        const rent = computeRent(state, seat.position, opts.diceTotal ?? 0, opts.rentOpts ?? {});
+        const rent = computeRent(state, seat.position, opts.diceTotal ?? 0, { ...(opts.rentOpts ?? {}), landerSeat: seatIndex });
         if (rent > 0) {
           const rebate = computeRentRebate(state, seat, space, prop, seatIndex);
           const bankCovers = Math.round(rent * rebate * 100) / 100;
           const playerOwes = Math.round((rent - bankCovers) * 100) / 100;
           log('rentDue', seatIndex, {
-            creditor: prop.ownerSeat,
+            creditor: ownerJailed ? null : prop.ownerSeat,
+            ownerJailed,
             amount: rent,
             playerOwes,
             bankCovers,
             rebate
           });
-          if (bankCovers > 0) {
+          if (bankCovers > 0 && !ownerJailed) {
             ownerSeat.cash = Math.round((ownerSeat.cash + bankCovers) * 100) / 100;
           }
           if (playerOwes > 0) {
-            tryDebit(state, seatIndex, playerOwes, { type: 'rent', creditorSeat: prop.ownerSeat }, log);
+            const creditorSeat = ownerJailed ? null : prop.ownerSeat;
+            tryDebit(state, seatIndex, playerOwes, { type: 'rent', creditorSeat }, log);
           }
+        }
+        if (space.type === 'railroad') {
+          maybeQueueTrainTravel(state, seatIndex, seat.position, log);
         }
       }
       return;
@@ -415,16 +555,19 @@ function tryDebit(state, debtorSeat, amount, source, log) {
   const debtor = state.seats[debtorSeat];
   if (debtor.cash >= amount) {
     debtor.cash -= amount;
-    if (source.type === 'rent') {
+    if (source.type === 'rent' && typeof source.creditorSeat === 'number') {
       state.seats[source.creditorSeat].cash += amount;
     }
     log('pay', debtorSeat, { amount, source });
     return true;
   }
+  const creditor = source.type === 'rent' && typeof source.creditorSeat === 'number'
+    ? { kind: 'player', seat: source.creditorSeat }
+    : { kind: 'bank' };
   state.pendingAction = {
     type: 'settleDebt',
     debtorSeat,
-    creditor: source.type === 'rent' ? { kind: 'player', seat: source.creditorSeat } : { kind: 'bank' },
+    creditor,
     amount,
     source
   };
@@ -504,24 +647,27 @@ function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, diceTot
       return;
     }
     case 'collect': {
-      seat.cash += e.amount;
-      log('collect', seatIndex, { amount: e.amount });
+      const amount = inflatedPrice(state, e.amount);
+      seat.cash = Math.round((seat.cash + amount) * 100) / 100;
+      log('collect', seatIndex, { amount, base: e.amount });
       returnCardToDiscard(state, deckName, id);
       return;
     }
     case 'pay': {
+      const amount = inflatedPrice(state, e.amount);
       returnCardToDiscard(state, deckName, id);
-      tryDebit(state, seatIndex, e.amount, { type: 'card', name: card.text }, log);
+      tryDebit(state, seatIndex, amount, { type: 'card', name: card.text }, log);
       return;
     }
     case 'payEachPlayer': {
       returnCardToDiscard(state, deckName, id);
       const others = state.seats.filter((s) => s.seat !== seatIndex && !s.bankrupt);
-      const total = e.amount * others.length;
+      const perPlayer = inflatedPrice(state, e.amount);
+      const total = Math.round(perPlayer * others.length * 100) / 100;
       if (seat.cash >= total) {
-        seat.cash -= total;
-        for (const o of others) o.cash += e.amount;
-        log('payEachPlayer', seatIndex, { amount: e.amount, others: others.length });
+        seat.cash = Math.round((seat.cash - total) * 100) / 100;
+        for (const o of others) o.cash = Math.round((o.cash + perPlayer) * 100) / 100;
+        log('payEachPlayer', seatIndex, { amount: perPlayer, base: e.amount, others: others.length });
       } else {
         // Open settleDebt for the full chairman amount.
         state.pendingAction = {
@@ -529,7 +675,7 @@ function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, diceTot
           debtorSeat: seatIndex,
           creditor: { kind: 'bank' }, // simplification: treat as bank debt; payout happens on settle
           amount: total,
-          source: { type: 'chairman', perPlayer: e.amount, recipients: others.map((o) => o.seat) }
+          source: { type: 'chairman', perPlayer, recipients: others.map((o) => o.seat) }
         };
         log('settleDebt', seatIndex, { amount: total, source: 'chairman' });
       }
@@ -538,22 +684,20 @@ function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, diceTot
     case 'collectFromEachPlayer': {
       returnCardToDiscard(state, deckName, id);
       const others = state.seats.filter((s) => s.seat !== seatIndex && !s.bankrupt);
+      const perPlayer = inflatedPrice(state, e.amount);
       for (const o of others) {
-        const give = Math.min(o.cash, e.amount);
-        o.cash -= give;
-        seat.cash += give;
-        if (give < e.amount && o.cash === 0) {
-          // o is owed too — for simplicity, this card's debt to debtor isn't a settleDebt;
-          // partial payment is fine. (A strict interpretation would have o go bankrupt to debtor.)
-        }
+        const give = Math.min(o.cash, perPlayer);
+        o.cash = Math.round((o.cash - give) * 100) / 100;
+        seat.cash = Math.round((seat.cash + give) * 100) / 100;
       }
-      log('collectFromEachPlayer', seatIndex, { amount: e.amount, others: others.length });
+      log('collectFromEachPlayer', seatIndex, { amount: perPlayer, base: e.amount, others: others.length });
       return;
     }
     case 'goToJail': {
-      sendToJail(seat);
+      const r = sendToJailWithSeizure(state, seatIndex);
       returnCardToDiscard(state, deckName, id);
       log('toJail', seatIndex, null);
+      if (r.seizureRequired) log('jailSeizureRequired', seatIndex, { choices: r.choices });
       return;
     }
     case 'getOutOfJailFree': {
@@ -566,10 +710,20 @@ function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, diceTot
     case 'repairs': {
       const houses = totalHousesOwned(state, seatIndex);
       const hotels = totalHotelsOwned(state, seatIndex);
-      const amount = houses * e.perHouse + hotels * e.perHotel;
+      const baseAmount = houses * e.perHouse + hotels * e.perHotel;
+      const amount = inflatedPrice(state, baseAmount);
       returnCardToDiscard(state, deckName, id);
       if (amount === 0) return;
       tryDebit(state, seatIndex, amount, { type: 'repairs', name: card.text }, log);
+      return;
+    }
+    case 'fdicDisaster': {
+      returnCardToDiscard(state, deckName, id);
+      const r = applyFdicDisaster(state.seats);
+      log('fdicDisaster', seatIndex, {
+        triggeringSeat: seatIndex,
+        losses: r.losses
+      });
       return;
     }
     default:
@@ -728,6 +882,31 @@ function doAuctionTick(state, action, ctx, log) {
 
 function finalizeAuction(state, ctx, log) {
   const pa = state.pendingAction;
+  if (pa.currentBid === 0) {
+    const nextAttempt = (pa.attempt ?? 0) + 1;
+    if (nextAttempt < AUCTION_ATTEMPT_FRACTIONS.length) {
+      const auction = createAuction(pa.spaceIndex, nextAttempt);
+      state.pendingAction = auction;
+      log('auctionStart', null, {
+        spaceIndex: pa.spaceIndex,
+        attempt: nextAttempt,
+        startPrice: auction.startPrice,
+        endsAtMs: auction.endsAtMs,
+        reason: 'cascadeNoBid'
+      });
+      return;
+    }
+    const r = randomAssignAuctionFn(state, pa.spaceIndex, ctx?.rng);
+    log('auctionEnd', null, {
+      spaceIndex: pa.spaceIndex,
+      soldTo: r.soldTo,
+      price: 0,
+      randomized: true
+    });
+    state.pendingAction = null;
+    continueEndTurnFlow(state, ctx, log);
+    return;
+  }
   const result = settleAuctionFn(state, pa);
   log('auctionEnd', null, {
     spaceIndex: pa.spaceIndex,
@@ -740,19 +919,51 @@ function finalizeAuction(state, ctx, log) {
   continueEndTurnFlow(state, ctx, log);
 }
 
-// ---------- MORTGAGE / BUILDING ----------
-function doMortgage(state, action, ctx, log) {
-  const r = mortgageFn(state, action.seat, action.spaceIndex);
+function doRequestMortgageLoan(state, action, ctx, log) {
+  const reserveRate = state.economy?.reserveRate ?? 0;
+  const r = requestMortgageLoanFn(
+    state,
+    action.seat,
+    action.spaceIndex,
+    action.term,
+    action.downPaymentPct ?? 0,
+    { reserveRate }
+  );
   if (!r.ok) return { error: r.error };
-  log('mortgage', action.seat, { spaceIndex: action.spaceIndex, payout: r.payout });
-  tryAutoSettle(state, log);
+  log('mortgageLoanIssued', action.seat, {
+    spaceIndex: action.spaceIndex,
+    loanId: r.loan.id,
+    principal: r.loan.principal,
+    term: r.loan.term,
+    ptr: r.loan.ptr,
+    downPaymentPct: r.loan.downPaymentPct
+  });
   return {};
 }
 
-function doUnmortgage(state, action, ctx, log) {
-  const r = unmortgageFn(state, action.seat, action.spaceIndex);
+function doPayMortgageInstallment(state, action, ctx, log) {
+  const r = payMortgageInstallmentFn(state, action.seat, action.loanId);
   if (!r.ok) return { error: r.error };
-  log('unmortgage', action.seat, { spaceIndex: action.spaceIndex, cost: r.cost });
+  log('mortgageInstallmentPaid', action.seat, {
+    loanId: action.loanId,
+    paid: r.paid,
+    balance: r.loan.balance,
+    closed: r.loan.status === 'closed'
+  });
+  return {};
+}
+
+function doSkipMortgageInstallment(state, action, ctx, log) {
+  const r = skipMortgageInstallmentFn(state, action.seat, action.loanId);
+  if (!r.ok) return { error: r.error };
+  log('mortgageInstallmentSkipped', action.seat, { loanId: action.loanId });
+  return {};
+}
+
+function doPayoffMortgageLoan(state, action, ctx, log) {
+  const r = payoffMortgageLoanFn(state, action.seat, action.loanId);
+  if (!r.ok) return { error: r.error };
+  log('mortgageLoanPaidOff', action.seat, { loanId: action.loanId, paid: r.paid });
   return {};
 }
 
@@ -866,6 +1077,7 @@ function doRollForJail(state, action, ctx, log) {
   if (r.error) return { error: r.error };
   state.rngCursor++;
   state.turn.lastRoll = [r.roll.d1, r.roll.d2];
+  state.turn.lastRollWasDoubles = false;
   log('jailRoll', action.seat, { d1: r.roll.d1, d2: r.roll.d2, released: r.released });
 
   if (r.released) {
@@ -876,12 +1088,11 @@ function doRollForJail(state, action, ctx, log) {
     resolveLanding(state, action.seat, ctx, log, { diceTotal: r.roll.total });
     state.turn.phase = state.pendingAction ? 'resolving' : 'endable';
   } else if (r.insolvent) {
-    // Force settleDebt for the $50 fine they owe to the bank.
     state.pendingAction = {
       type: 'settleDebt',
       debtorSeat: action.seat,
       creditor: { kind: 'bank' },
-      amount: 50,
+      amount: r.fine,
       source: { type: 'jailFine' }
     };
     state.turn.phase = 'resolving';
@@ -891,7 +1102,73 @@ function doRollForJail(state, action, ctx, log) {
   return {};
 }
 
-// ---------- BANKRUPTCY ----------
+function computeTrainTravelChoices(state, fromIdx) {
+  const fromOwner = state.properties[fromIdx]?.ownerSeat;
+  const ownersByIdx = new Map();
+  let ownerWithMultiple = null;
+  for (const idx of RAILROAD_INDICES) {
+    const owner = state.properties[idx]?.ownerSeat;
+    if (owner == null) continue;
+    ownersByIdx.set(idx, owner);
+    if (owner === fromOwner && idx !== fromIdx) {
+      if (!ownerWithMultiple) ownerWithMultiple = fromOwner;
+    }
+  }
+  if (ownerWithMultiple != null) {
+    return RAILROAD_INDICES.filter((i) => i !== fromIdx && ownersByIdx.get(i) === ownerWithMultiple);
+  }
+  return RAILROAD_INDICES.filter((i) => i !== fromIdx && ownersByIdx.has(i));
+}
+
+function maybeQueueTrainTravel(state, seatIndex, fromIdx, log) {
+  const choices = computeTrainTravelChoices(state, fromIdx);
+  if (choices.length === 0) return;
+  state.pendingTrainTravel = { seat: seatIndex, fromIdx, choices };
+  log('trainTravelOffered', seatIndex, { fromIdx, choices });
+}
+
+function doChooseTrainDestination(state, action, ctx, log) {
+  const pending = state.pendingTrainTravel;
+  if (!pending) return { error: 'NO_TRAIN_PENDING' };
+  if (pending.seat !== action.seat) return { error: 'NOT_TRAVELER' };
+  if (!pending.choices.includes(action.spaceIndex)) return { error: 'INVALID_CHOICE' };
+  const seat = state.seats[action.seat];
+  const from = pending.fromIdx;
+  const to = action.spaceIndex;
+  const passedGo = to < from;
+  seat.position = to;
+  if (passedGo) {
+    seat.cash = Math.round((seat.cash + GO_SALARY) * 100) / 100;
+    log('passGo', action.seat, { amount: GO_SALARY });
+  }
+  state.pendingTrainTravel = null;
+  log('trainTraveled', action.seat, { fromIdx: from, toIdx: to, passedGo });
+  return {};
+}
+
+function doSkipTrainTravel(state, action, ctx, log) {
+  const pending = state.pendingTrainTravel;
+  if (!pending) return { error: 'NO_TRAIN_PENDING' };
+  if (pending.seat !== action.seat) return { error: 'NOT_TRAVELER' };
+  state.pendingTrainTravel = null;
+  log('trainTravelSkipped', action.seat, null);
+  return {};
+}
+
+function doChooseJailSeizure(state, action, ctx, log) {
+  const pending = state.pendingJailSeizureChoice;
+  if (!pending) return { error: 'NO_SEIZURE_PENDING' };
+  if (pending.seat !== action.seat) return { error: 'NOT_DEBTOR' };
+  const idx = action.spaceIndex;
+  if (!pending.choices.includes(idx)) return { error: 'INVALID_CHOICE' };
+  const r = seizePropertyToBank(state, action.seat, idx);
+  if (!r.ok) return { error: r.error };
+  state.pendingJailSeizureChoice = null;
+  log('jailSeized', action.seat, { spaceIndex: idx });
+  return {};
+}
+
+
 function doDeclareBankruptcy(state, action, ctx, log) {
   const pa = state.pendingAction;
   if (!pa || pa.type !== 'settleDebt') return { error: 'NO_DEBT' };
@@ -949,33 +1226,42 @@ function continueEndTurnFlow(state, ctx, log) {
     return;
   }
   const seat = state.seats[state.turn.seat];
-  const lastRoll = state.turn.lastRoll;
-  const wasDoubles = lastRoll && lastRoll[0] === lastRoll[1];
+  const wasDoubles = state.turn.lastRollWasDoubles;
   if (seat && wasDoubles && !seat.inJail && state.turn.doublesCount < MAX_DOUBLES) {
     state.turn.phase = 'preRoll';
     state.turn.lastRoll = null;
+    state.turn.lastRollWasDoubles = false;
     log('rollAgain', state.turn.seat, null);
     return;
   }
   advanceTurn(state);
-  // Flip the market every N completed turns. Counted across all seats so
-  // cadence is consistent regardless of turn order. Uses the reducer's
-  // seeded RNG so games stay reproducible.
+  state.turnCount = (state.turnCount ?? 0) + 1;
+
+  if (state.economy && ctx?.rng) {
+    const result = flipEconomy(state.economy, ctx.rng);
+    state.rngCursor++;
+    log('economyFlip', null, {
+      card: result.card,
+      intIgnored: result.intIgnored,
+      reshuffled: result.reshuffled,
+      reserveRate: result.reserveRate,
+      inflationFactor: result.inflationFactor
+    });
+  }
   if (state.stocks && ctx?.rng) {
-    state.stocks.cycle = (state.stocks.cycle ?? 0) + 1;
-    if (state.stocks.cycle % AUTO_FLIP_EVERY_N_TURNS === 0) {
-      // Accrue card interest BEFORE flipMarket — the latter mutates
-      // state.stocks.cycle internally (stocks.js bumps round+cycle), so by the
-      // time it returns we'd be off the 4-turn boundary that accrueCardInterest
-      // gates on.
-      const interestEvents = accrueCardInterest(state.seats, state.stocks.cycle);
-      for (const e of interestEvents) {
-        log('cardInterest', e.seatIndex, e);
-      }
-      const results = flipMarket(state.stocks, ctx.rng);
-      state.rngCursor++;
-      clearStaleWildcardReveals(state, results.__reshuffled);
-      log('marketFlip', null, { results, source: 'auto' });
+    const results = flipMarket(state.stocks, ctx.rng);
+    state.rngCursor++;
+    clearStaleWildcardReveals(state, results.__reshuffled);
+    log('marketFlip', null, { results, source: 'auto' });
+  }
+  if (state.turnCount > 0) {
+    const interestEvents = accrueCardInterest(
+      state.seats,
+      state.turnCount,
+      state.economy?.reserveRate ?? 0
+    );
+    for (const e of interestEvents) {
+      log('cardInterest', e.seatIndex, e);
     }
   }
   const newSeat = state.seats[state.turn.seat];
@@ -990,11 +1276,12 @@ function continueEndTurnFlow(state, ctx, log) {
     }
     // Reset the once-per-turn event-card flag.
     newSeat.drewEventCardThisTurn = false;
-    // Pay HYSA interest on the seat's cash. Paid before card fees so a
-    // borderline seat may earn just enough interest to cover the fee.
-    const hysa = applyHysaInterestAtTurnStart(newSeat);
-    if (hysa.paid > 0) {
-      log('hysaInterest', state.turn.seat, { paid: hysa.paid, rate: hysa.rate });
+    const hysaEvents = applyHysaInterestAtTurnStart(
+      newSeat,
+      state.economy?.reserveRate ?? 0
+    );
+    for (const e of hysaEvents) {
+      log('hysaInterest', state.turn.seat, e);
     }
     // Charge each active credit card's rotating fee. Cards auto-cancel if the
     // seat can't afford the fee; we surface those as separate log entries.
@@ -1010,6 +1297,13 @@ function continueEndTurnFlow(state, ctx, log) {
       if (markLoansDueAtTurnStart(newSeat)) {
         log('loansDue', state.turn.seat, {
           count: newSeat.loans.filter((l) => l.dueThisTurn).length
+        });
+      }
+    }
+    if (Array.isArray(newSeat.mortgageLoans) && newSeat.mortgageLoans.length > 0) {
+      if (markMortgageLoansDueAtTurnStart(newSeat)) {
+        log('mortgageLoansDue', state.turn.seat, {
+          count: newSeat.mortgageLoans.filter((l) => l.dueThisTurn).length
         });
       }
     }
@@ -1080,14 +1374,34 @@ function doSellStock(state, action, ctx, log) {
 function doRequestLoan(state, action, ctx, log) {
   const seat = state.seats[action.seat];
   if (!seat || seat.bankrupt) return { error: 'BANKRUPT' };
+  const bank = action.bank ?? 'mmcu';
+  if (!BANKS[bank]) return { error: 'UNKNOWN_BANK' };
+  if (bank === 'boardwalk') {
+    const tier = getTierByScore(seat.creditScore ?? 0).name;
+    if (tier !== 'Very Good' && tier !== 'Excellent') {
+      return { error: 'BOARDWALK_TIER_GATE' };
+    }
+  }
+  const reserveRate = state.economy?.reserveRate ?? 0;
+  const boardwalkDiscount =
+    bank === 'boardwalk' && eligibleForBoardwalkDiscount(seat)
+      ? BANKS.boardwalk.loanDiscountIfMmFree
+      : 0;
   const roll = rollLoanDie(ctx.rng);
   state.rngCursor++;
-  const r = requestLoanOffer(seat, action.amount, roll);
+  const r = requestLoanOffer(seat, action.amount, roll, {
+    bank,
+    reserveRate,
+    boardwalkDiscount
+  });
   if (!r.ok) return { error: r.error };
   log('loanOffer', action.seat, {
+    bank,
     principal: r.offer.principal,
     roll,
     tier: r.offer.tier,
+    reserveRate,
+    boardwalkDiscount,
     options: r.offer.options
   });
   return {};
@@ -1151,11 +1465,24 @@ function doPayoffLoan(state, action, ctx, log) {
   return {};
 }
 
-// ---------- CREDIT CARDS ----------
+function doRequestCreditLineIncrease(state, action, ctx, log) {
+  const seat = state.seats[action.seat];
+  if (!seat || seat.bankrupt) return { error: 'BANKRUPT' };
+  const r = requestCreditLineIncrease(seat, action.instanceId);
+  if (!r.ok) return { error: r.error };
+  log('creditLineIncreaseRequested', action.seat, {
+    instanceId: action.instanceId,
+    oldLine: r.oldLine,
+    newLine: r.newLine,
+    increased: r.increased
+  });
+  return {};
+}
+
 function doRequestCreditCard(state, action, ctx, log) {
   const seat = state.seats[action.seat];
   if (!seat || seat.bankrupt) return { error: 'BANKRUPT' };
-  const r = applyForCard(seat, action.cardId, Date.now());
+  const r = applyForCard(seat, action.cardId, state.turnCount ?? 0, Date.now());
   if (!r.ok) return { error: r.error };
   log('cardAcquired', action.seat, {
     cardId: action.cardId,
@@ -1301,6 +1628,55 @@ function doSkipPlayer(state, action, ctx, log) {
   advanceTurn(state);
   log('skipPlayer', action.targetSeat, null);
   log('turnStart', state.turn.seat, null);
+  return {};
+}
+
+function doOpenBankAccount(state, action, ctx, log) {
+  const seat = state.seats[action.seat];
+  if (!seat) return { error: 'NO_SEAT' };
+  if (seat.bankrupt) return { error: 'BANKRUPT' };
+  const r = openAccount(seat, action.bank, Date.now());
+  if (!r.ok) return { error: r.error };
+  log('bankAccountOpened', action.seat, { bank: action.bank });
+  return {};
+}
+
+function doCloseBankAccount(state, action, ctx, log) {
+  const seat = state.seats[action.seat];
+  if (!seat) return { error: 'NO_SEAT' };
+  const r = closeAccount(seat, action.bank);
+  if (!r.ok) return { error: r.error };
+  log('bankAccountClosed', action.seat, { bank: action.bank });
+  return {};
+}
+
+function doDepositToBank(state, action, ctx, log) {
+  const seat = state.seats[action.seat];
+  if (!seat) return { error: 'NO_SEAT' };
+  if (seat.bankrupt) return { error: 'BANKRUPT' };
+  const r = deposit(seat, action.bank, action.amount);
+  if (!r.ok) return { error: r.error };
+  log('deposit', action.seat, {
+    bank: action.bank,
+    amount: r.amount,
+    cash: r.cash,
+    balance: r.balance
+  });
+  return {};
+}
+
+function doWithdrawFromBank(state, action, ctx, log) {
+  const seat = state.seats[action.seat];
+  if (!seat) return { error: 'NO_SEAT' };
+  if (seat.bankrupt) return { error: 'BANKRUPT' };
+  const r = withdraw(seat, action.bank, action.amount);
+  if (!r.ok) return { error: r.error };
+  log('withdraw', action.seat, {
+    bank: action.bank,
+    amount: r.amount,
+    cash: r.cash,
+    balance: r.balance
+  });
   return {};
 }
 

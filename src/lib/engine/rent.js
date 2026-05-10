@@ -1,18 +1,25 @@
 import { BOARD } from '../shared/board.js';
 import {
   RAILROAD_RENT,
-  UTILITY_MULT,
   COLOR_GROUPS
 } from '../shared/constants.js';
 import {
   ownedRailroadCount,
-  ownedUtilityCount
+  ownedUtilityCount,
+  countOwnedProperties,
+  countOwnedDevelopments
 } from './selectors.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 
 // Compute rent owed when seat-debtor lands on space `index`, owned by ownerSeat.
 // `diceTotal` is required for utility rent. `multiplier` lets a Chance card force 2x railroad
 // or 10x utility regardless of how many the owner has.
 export function computeRent(state, index, diceTotal, opts = {}) {
+  const base = baseRent(state, index, diceTotal, opts);
+  return inflatedPrice(state, base);
+}
+
+function baseRent(state, index, diceTotal, opts) {
   const space = BOARD[index];
   if (!space) return 0;
   const prop = state.properties[index];
@@ -40,9 +47,12 @@ export function computeRent(state, index, diceTotal, opts = {}) {
     if (opts.utilityMultiplier) {
       return diceTotal * opts.utilityMultiplier;
     }
-    const count = ownedUtilityCount(state, ownerSeat);
-    const mult = UTILITY_MULT[Math.max(0, count - 1)] ?? UTILITY_MULT[0];
-    return diceTotal * mult;
+    const ownerUtilities = ownedUtilityCount(state, ownerSeat);
+    const lander = typeof opts.landerSeat === 'number' ? opts.landerSeat : ownerSeat;
+    const props = countOwnedProperties(state, lander);
+    const devs = countOwnedDevelopments(state, lander);
+    const mult = ownerUtilities >= 2 ? 15 : 10;
+    return (props + devs) * mult;
   }
 
   return 0;

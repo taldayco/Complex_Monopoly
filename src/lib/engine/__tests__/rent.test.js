@@ -50,17 +50,17 @@ test('rent: railroads scale with count owned', () => {
   assert.equal(computeRent(room, 5, 0), 200);
 });
 
-test('rent: utility 1 owned = 4x dice', () => {
+test('rent: utility 1 owned = (props + devs) × 10', () => {
   const room = makeRoom(2);
   giveProperty(room, 1, 12);
-  assert.equal(computeRent(room, 12, 7), 28);
+  assert.equal(computeRent(room, 12, 7), 10);
 });
 
-test('rent: utility 2 owned = 10x dice', () => {
+test('rent: utility 2 owned = (props + devs) × 15', () => {
   const room = makeRoom(2);
   giveProperty(room, 1, 12);
   giveProperty(room, 1, 28);
-  assert.equal(computeRent(room, 12, 7), 70);
+  assert.equal(computeRent(room, 12, 7), 30);
 });
 
 test('rent: chance card railroad multiplier overrides count', () => {

@@ -110,9 +110,21 @@ export function startGame(code, playerToken) {
   if (room.phase !== 'lobby') return { error: 'ALREADY_STARTED' };
   if (room.seats.length < MIN_PLAYERS) return { error: 'NOT_ENOUGH_PLAYERS' };
 
-  room.phase = 'playing';
-  room.turn = { seat: 0, phase: 'preRoll', lastRoll: null, doublesCount: 0 };
+  room.phase = 'rollOff';
+  room.rollOff = {
+    contenders: room.seats.map((s) => s.seat),
+    rolls: {},
+    settledOrder: [],
+    round: 1
+  };
+  room.turn = { seat: 0, phase: 'preRoll', lastRoll: null, lastRollWasDoubles: false, doublesCount: 0 };
   room.log.push({ ts: Date.now(), seat: null, type: 'gameStart', payload: null });
+  room.log.push({
+    ts: Date.now(),
+    seat: null,
+    type: 'rollOffStart',
+    payload: { contenders: room.rollOff.contenders, round: 1 }
+  });
   saveRoom(room);
   return { room };
 }

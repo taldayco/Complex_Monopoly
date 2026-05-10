@@ -32,7 +32,6 @@ export function createStocksState(rngSeed = 0, { primeHistory = true } = {}) {
   }
   const stocks = {
     round: 0,
-    cycle: 0,
     lastFlip: null,
     market
   };
@@ -73,8 +72,8 @@ export function hydrateStocks(stocks, rngSeed = 0) {
     }
   }
   if (typeof stocks.round !== 'number') stocks.round = 0;
-  if (typeof stocks.cycle !== 'number') stocks.cycle = 0;
   if (stocks.lastFlip === undefined) stocks.lastFlip = null;
+  delete stocks.cycle;
   return stocks;
 }
 
@@ -232,7 +231,6 @@ export function flipMarket(stocks, rng, now = Date.now()) {
   pushHistory(stocks.market[FP500_SYMBOL]);
   results[FP500_SYMBOL] = stocks.market[FP500_SYMBOL].price;
   stocks.round += 1;
-  stocks.cycle += 1;
   stocks.lastFlip = { at: now, results };
   Object.defineProperty(results, '__reshuffled', {
     value: reshuffled,

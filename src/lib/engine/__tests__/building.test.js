@@ -4,12 +4,12 @@ import { canBuyHouse, buyHouse, sellHouse } from '../building.js';
 import { canSellPropertyToBank, sellPropertyToBank } from '../mortgage.js';
 import { makeRoom, giveProperty } from './helpers.js';
 
-test('cannot build without monopoly', () => {
+test('can build without monopoly when no other owners exist for the color', () => {
   const room = makeRoom(2);
-  giveProperty(room, 0, 1); // only Mediterranean, missing Baltic
+  giveProperty(room, 0, 1);
   const r = canBuyHouse(room, 0, 1);
-  assert.equal(r.ok, false);
-  assert.equal(r.error, 'NO_MONOPOLY');
+  assert.equal(r.ok, true);
+  assert.equal(r.permitFees, 0);
 });
 
 test('build is allowed with full monopoly', () => {

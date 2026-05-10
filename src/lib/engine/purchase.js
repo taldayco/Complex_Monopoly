@@ -1,4 +1,5 @@
 import { BOARD, isOwnable } from '../shared/board.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 
 export function canBuy(state, seatIndex, spaceIndex) {
   const space = BOARD[spaceIndex];
@@ -6,22 +7,23 @@ export function canBuy(state, seatIndex, spaceIndex) {
   const prop = state.properties[spaceIndex];
   if (prop.ownerSeat != null) return { ok: false, error: 'OWNED' };
   const seat = state.seats[seatIndex];
-  if (seat.cash < space.price) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
-  return { ok: true, price: space.price };
+  const price = inflatedPrice(state, space.price);
+  if (seat.cash < price) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
+  return { ok: true, price };
 }
 
 export function buyProperty(state, seatIndex, spaceIndex) {
   const check = canBuy(state, seatIndex, spaceIndex);
   if (!check.ok) return check;
-  const space = BOARD[spaceIndex];
   const seat = state.seats[seatIndex];
-  seat.cash -= space.price;
+  const price = check.price;
+  seat.cash = Math.round((seat.cash - price) * 100) / 100;
   const t = transferOwnership(state, seatIndex, spaceIndex);
   if (!t.ok) {
-    seat.cash += space.price;
+    seat.cash = Math.round((seat.cash + price) * 100) / 100;
     return t;
   }
-  return { ok: true, price: space.price };
+  return { ok: true, price };
 }
 
 // Pure ownership flip + price lookup. Used by both outright buy and
@@ -32,7 +34,7 @@ export function transferOwnership(state, seatIndex, spaceIndex) {
   const prop = state.properties[spaceIndex];
   if (prop.ownerSeat != null) return { ok: false, error: 'OWNED' };
   prop.ownerSeat = seatIndex;
-  return { ok: true, price: space.price };
+  return { ok: true, price: inflatedPrice(state, space.price) };
 }
 
 // Forced sale of a mortgaged property when transferred to a player who declines to keep mortgaged:

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
 import { makeRoom, makeRng } from './helpers.js';
 import {
-  getMaxLineFor,
+  getCardLineBonusFor,
   getMissedPaymentPenalty,
   getPtrDiscountFor,
   meetsTierRequirement
@@ -30,12 +30,12 @@ test('meetsTierRequirement compares tiers correctly', () => {
   assert.equal(meetsTierRequirement({ creditScore: 800 }, 'Fair'), true);
 });
 
-test('getMaxLineFor applies card bonuses multiplicatively', () => {
+test('getCardLineBonusFor sums active card maxLineBonus values', () => {
   const seat = { creditScore: 800, creditCards: [
-    { id: 'b', cardId: 'boardwalkPreferred', status: 'active' }  // +40%
+    { id: 'b', cardId: 'boardwalkPreferred', status: 'active' }
   ]};
-  // Excellent base = 1000; *1.4 = 1400
-  assert.equal(getMaxLineFor(seat), 1400);
+  assert.equal(getCardLineBonusFor(seat), 0.4);
+  assert.equal(getCardLineBonusFor({ creditCards: [] }), 0);
 });
 
 test('getMissedPaymentPenalty returns lowest override (Vault Platinum: 5)', () => {
@@ -94,13 +94,13 @@ test('requestCreditCard: debits signing fee and adds to creditCards', () => {
   assert.equal(s.seats[0].cash, cashBefore - 400 + 0);
 });
 
-test('requestCreditCard: rejects duplicate active card', () => {
+test('requestCreditCard: rejects second card from the same bank (per-bank uniqueness)', () => {
   let s = makeRoom(2);
   s.seats[0].creditScore = 800;
   s = step(s, { type: 'requestCreditCard', seat: 0, cardId: 'vaultPlatinum' });
-  const r = reducer(s, { type: 'requestCreditCard', seat: 0, cardId: 'vaultPlatinum' }, { rng: makeRng() });
+  const r = reducer(s, { type: 'requestCreditCard', seat: 0, cardId: 'boardwalkPreferred' }, { rng: makeRng() });
   assert.equal(r.ok, false);
-  assert.equal(r.error, 'ALREADY_OWNED');
+  assert.equal(r.error, 'BANK_LIMIT_REACHED');
 });
 
 test('cancelCreditCard: charges cancel fee and marks status cancelled', () => {
@@ -119,12 +119,11 @@ test('cancelCreditCard: charges cancel fee and marks status cancelled', () => {
 
 test('loan offer: Boardwalk Preferred boosts max line allowing larger principal', () => {
   let s = makeRoom(2);
-  s.seats[0].creditScore = 750; // Very Good → base $500
-  // Without the card $600 should be over-limit.
+  s.seats[0].creditScore = 750;
+  s.seats[0].cash = 280;
   let r = reducer(s, { type: 'requestLoan', seat: 0, amount: 600 }, { rng: makeRng() });
   assert.equal(r.ok, false);
-  assert.equal(r.error, 'OVER_MAX_LINE');
-  // Add Boardwalk Preferred (+40%) → max line becomes $700.
+  assert.equal(r.error, 'EXCEEDS_MAX_LINE');
   s.seats[0].creditCards.push({ id: 'CC-bp', cardId: 'boardwalkPreferred', status: 'active' });
   s = step(s, { type: 'requestLoan', seat: 0, amount: 600 });
   assert.ok(s.seats[0].pendingLoanOffer);
@@ -225,24 +224,21 @@ test('payCardBalance debits cash, reduces balance, caps at outstanding', () => {
 
 test('accrueCardInterest only fires on cycle multiples of 4 and skips zero-balance / cancelled', () => {
   const s = makeRoom(2);
-  const vp = activeVpCard(s.seats[0], 500); // 20% on $500 = +$100
-  // Off-boundary cycles do nothing.
+  s.seats[0].cash = 0;
+  const vp = activeVpCard(s.seats[0], 500);
   for (const cycle of [0, 1, 2, 3, 5, 6, 7]) {
     const ev = accrueCardInterest(s.seats, cycle);
     assert.equal(ev.length, 0, `cycle ${cycle} should not accrue`);
   }
   assert.equal(vp.balance, 500);
-  // On a 4-boundary, accrue.
   let ev = accrueCardInterest(s.seats, 4);
   assert.equal(ev.length, 1);
   assert.equal(ev[0].interest, 100);
   assert.equal(vp.balance, 600);
-  // Cancelled cards are skipped even on a boundary.
   vp.status = 'cancelled';
   ev = accrueCardInterest(s.seats, 8);
   assert.equal(ev.length, 0);
   assert.equal(vp.balance, 600);
-  // Active card with zero balance is skipped (no $0 events spam the log).
   vp.status = 'active';
   vp.balance = 0;
   ev = accrueCardInterest(s.seats, 8);
@@ -339,17 +335,15 @@ test('payCardBalance via reducer: cash debited, balance reduced', () => {
 // ---------- end-of-turn hook: interest accrues every 4 cycles ----------
 
 test('end-turn at 4-cycle boundary accrues interest on active card balances', () => {
-  // Seed cycle to 3 so the next end-turn pushes it to 4 and triggers accrual.
-  // (flipMarket also bumps cycle internally, so the post-condition cycle is 5,
-  // not 4 — what we care about is that interest fired exactly once.)
   let s = makeRoom(2);
-  s.stocks.cycle = 3;
-  activeVpCard(s.seats[0], 500); // 20% on $500 = +$100
+  s.turnCount = 3;
+  s.economy.reserveRate = 0;
+  s.seats[0].cash = 0;
+  activeVpCard(s.seats[0], 500);
   s.turn = { seat: 0, phase: 'endable', lastRoll: [1, 2], doublesCount: 0 };
   const r = reducer(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
   assert.equal(r.ok, true);
   assert.equal(r.state.seats[0].creditCards[0].balance, 600);
-  // The reducer should emit a cardInterest event for each accrued card.
   const ev = r.events.find((e) => e.type === 'cardInterest');
   assert.ok(ev, 'expected a cardInterest log event');
   assert.equal(ev.payload.interest, 100);
@@ -358,7 +352,7 @@ test('end-turn at 4-cycle boundary accrues interest on active card balances', ()
 
 test('end-turn off-boundary does NOT accrue interest', () => {
   let s = makeRoom(2);
-  s.stocks.cycle = 0; // next end-turn → 1, not a boundary
+  s.turnCount = 0; // next end-turn → 1, not a boundary
   activeVpCard(s.seats[0], 500);
   s.turn = { seat: 0, phase: 'endable', lastRoll: [1, 2], doublesCount: 0 };
   const r = reducer(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });

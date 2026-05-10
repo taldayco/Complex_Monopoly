@@ -11,6 +11,8 @@ import {
   VOLATILE_STOCK_ORDER,
   FP500_SYMBOL
 } from '../../shared/reserve/stockCatalog.js';
+import { clampCreditScore } from '../../shared/reserve/loanCatalog.js';
+import { COLOR_GROUPS } from '../../shared/constants.js';
 import { recalcFP500 } from './stocks.js';
 
 let EFFECT_ID_COUNTER = 0;
@@ -136,6 +138,36 @@ function applyEffect(state, seat, eff, ctx) {
       return applyBankPaysInstallment(seat);
     case 'revealWildcards':
       return applyRevealWildcards(state, seat, eff.symbol);
+    case 'cashAllSeats':
+      return applyCashAllSeats(state, eff.amount);
+    case 'inflationDelta':
+      return applyInflationDelta(state, eff.amount);
+    case 'dividendAll':
+      return applyDividendAll(seat, state.stocks, eff.pct);
+    case 'shortSqueeze':
+      return applyShortSqueeze(state.stocks, eff.pct);
+    case 'classEnvy':
+      return applyClassEnvy(state, eff.amount);
+    case 'antitrust':
+      return applyAntitrust(state, eff.amount);
+    case 'boardwalkScandal':
+      return applyBoardwalkScandal(state, eff.amount);
+    case 'predatoryLawsuit':
+      return applyPredatoryLawsuit(state, eff.creditDelta, eff.cashAmount);
+    case 'regionalBankFailure':
+      return applyRegionalBankFailure(state, ctx);
+    case 'maintenanceBill':
+      return applyMaintenanceBill(state, seat, eff.perHouse, eff.perHotel);
+    case 'taxAppeal':
+      return applyTaxAppeal(state, seat, eff.perDevelopedProperty);
+    case 'devModifier':
+      return applyDevModifier(seat, eff.amount, eff.oneHouseOnly);
+    case 'permitFeeModifier':
+      return applyPermitFeeModifier(seat, eff.amount);
+    case 'grantInventory':
+      return applyGrantInventory(seat, eff.item, eff.qty);
+    case 'wrongfullyAccused':
+      return applyWrongfullyAccused(seat);
     default:
       return { skipped: true, reason: 'UNKNOWN_EFFECT' };
   }
@@ -150,7 +182,7 @@ function applyCash(seat, amount) {
 
 function applyCreditScoreDelta(seat, amount) {
   const before = seat.creditScore ?? 0;
-  seat.creditScore = Math.max(300, Math.min(1200, before + amount));
+  seat.creditScore = clampCreditScore(before + amount);
   return { delta: amount, scoreBefore: before, scoreAfter: seat.creditScore };
 }
 
@@ -299,6 +331,200 @@ function applyBankPaysInstallment(seat) {
     target.status = 'closed';
   }
   return { loanId: target.id, amount };
+}
+
+function applyCashAllSeats(state, amount) {
+  const recipients = [];
+  for (const s of state.seats) {
+    if (s.bankrupt) continue;
+    s.cash = Math.round((s.cash + amount) * 100) / 100;
+    recipients.push(s.seat);
+  }
+  return { amount, recipients };
+}
+
+function applyInflationDelta(state, amount) {
+  if (!state.economy) return { skipped: true };
+  const before = state.economy.inflationFactor ?? 1;
+  state.economy.inflationFactor = Math.round((before + amount) * 1000) / 1000;
+  return { delta: amount, before, after: state.economy.inflationFactor };
+}
+
+function applyDividendAll(seat, stocks, pct) {
+  if (!stocks?.market) return { paid: 0 };
+  let total = 0;
+  const breakdown = [];
+  for (const sym of Object.keys(seat.stockLots ?? {})) {
+    const shares = seat.stockLots[sym] ?? 0;
+    if (shares <= 0) continue;
+    const price = stocks.market[sym]?.price ?? 0;
+    const paid = Math.round(shares * price * pct * 100) / 100;
+    if (paid > 0) {
+      total += paid;
+      breakdown.push({ symbol: sym, shares, price, paid });
+    }
+  }
+  if (total > 0) seat.cash = Math.round((seat.cash + total) * 100) / 100;
+  return { paid: total, breakdown };
+}
+
+function applyShortSqueeze(stocks, pct) {
+  if (!stocks?.market) return { skipped: true };
+  let worstSym = null;
+  let worstPrice = Infinity;
+  for (const sym of VOLATILE_STOCK_ORDER) {
+    const price = stocks.market[sym]?.price ?? Infinity;
+    if (price < worstPrice) {
+      worstPrice = price;
+      worstSym = sym;
+    }
+  }
+  if (!worstSym) return { skipped: true };
+  return applyStockShock(stocks, worstSym, pct);
+}
+
+function applyClassEnvy(state, amount) {
+  let richest = null;
+  let poorest = null;
+  for (const s of state.seats) {
+    if (s.bankrupt) continue;
+    if (richest == null || s.cash > state.seats[richest].cash) richest = s.seat;
+    if (poorest == null || s.cash < state.seats[poorest].cash) poorest = s.seat;
+  }
+  if (richest == null || poorest == null || richest === poorest) return { skipped: true };
+  const r = state.seats[richest];
+  const p = state.seats[poorest];
+  const transfer = Math.min(amount, r.cash);
+  r.cash = Math.round((r.cash - transfer) * 100) / 100;
+  p.cash = Math.round((p.cash + transfer) * 100) / 100;
+  return { richest, poorest, transferred: transfer };
+}
+
+function applyAntitrust(state, amount) {
+  const debited = [];
+  for (const s of state.seats) {
+    if (s.bankrupt) continue;
+    let ownsFullGroup = false;
+    for (const groupName of Object.keys(COLOR_GROUPS)) {
+      const indices = COLOR_GROUPS[groupName];
+      const allOwned = indices.every((i) => state.properties[i]?.ownerSeat === s.seat);
+      if (allOwned) {
+        ownsFullGroup = true;
+        break;
+      }
+    }
+    if (!ownsFullGroup) continue;
+    const debit = Math.min(amount, s.cash);
+    s.cash = Math.round((s.cash - debit) * 100) / 100;
+    debited.push({ seat: s.seat, amount: debit });
+  }
+  return { debited };
+}
+
+function applyBoardwalkScandal(state, amount) {
+  const debited = [];
+  for (const s of state.seats) {
+    if (s.bankrupt) continue;
+    const hasBoardwalkAccount = s.bankAccounts?.boardwalk?.open === true;
+    if (!hasBoardwalkAccount) continue;
+    const isExcellent = (s.creditScore ?? 0) >= 800;
+    if (isExcellent) continue;
+    const debit = Math.min(amount, s.cash);
+    s.cash = Math.round((s.cash - debit) * 100) / 100;
+    debited.push({ seat: s.seat, amount: debit });
+  }
+  return { debited };
+}
+
+function applyPredatoryLawsuit(state, creditDelta, cashAmount) {
+  let target = null;
+  let mostLoans = -1;
+  for (const s of state.seats) {
+    if (s.bankrupt) continue;
+    const count = (s.loans ?? []).filter((l) => l?.status === 'active').length;
+    if (count > mostLoans) {
+      mostLoans = count;
+      target = s.seat;
+    }
+  }
+  if (target == null || mostLoans <= 0) return { skipped: true };
+  const seat = state.seats[target];
+  seat.creditScore = clampCreditScore((seat.creditScore ?? 720) + creditDelta);
+  seat.cash = Math.round((seat.cash + cashAmount) * 100) / 100;
+  return { recipient: target, creditDelta, cashAmount };
+}
+
+function applyRegionalBankFailure(state, ctx) {
+  const rng = ctx?.rng ?? Math.random;
+  const die = Math.floor(rng() * 6) + 1;
+  const bank = die % 2 === 1 ? 'mmcu' : 'boardwalk';
+  const FDIC_CAP = 5000;
+  const losses = [];
+  for (const s of state.seats) {
+    if (s.bankrupt) continue;
+    const acct = s.bankAccounts?.[bank];
+    if (!acct?.open) continue;
+    if ((acct.balance ?? 0) > FDIC_CAP) {
+      const lost = Math.round((acct.balance - FDIC_CAP) * 100) / 100;
+      acct.balance = FDIC_CAP;
+      losses.push({ seat: s.seat, lost });
+    }
+  }
+  return { die, bank, losses };
+}
+
+function applyMaintenanceBill(state, seat, perHouse, perHotel) {
+  let owed = 0;
+  for (const idx of Object.keys(state.properties ?? {})) {
+    const prop = state.properties[idx];
+    if (prop?.ownerSeat !== seat.seat) continue;
+    const h = prop.houses ?? 0;
+    if (h === 0) continue;
+    if (h === 5) owed += perHotel;
+    else owed += perHouse * h;
+  }
+  const debit = Math.min(owed, seat.cash);
+  seat.cash = Math.round((seat.cash - debit) * 100) / 100;
+  return { owed, debited: debit };
+}
+
+function applyTaxAppeal(state, seat, perDevelopedProperty) {
+  let count = 0;
+  for (const idx of Object.keys(state.properties ?? {})) {
+    const prop = state.properties[idx];
+    if (prop?.ownerSeat !== seat.seat) continue;
+    if ((prop.houses ?? 0) > 0) count += 1;
+  }
+  const credit = count * perDevelopedProperty;
+  seat.cash = Math.round((seat.cash + credit) * 100) / 100;
+  return { credited: credit, properties: count };
+}
+
+function applyDevModifier(seat, amount, oneHouseOnly) {
+  seat.nextDevModifier = { amount, oneHouseOnly: !!oneHouseOnly, consumed: false };
+  return { amount, oneHouseOnly: !!oneHouseOnly };
+}
+
+function applyPermitFeeModifier(seat, amount) {
+  seat.nextPermitFeeModifier = { amount, consumed: false };
+  return { amount };
+}
+
+function applyGrantInventory(seat, item, qty) {
+  if (!seat.eventInventory) seat.eventInventory = { getOutOfJailFree: 0, avoidJail: 0 };
+  if (typeof seat.eventInventory[item] !== 'number') seat.eventInventory[item] = 0;
+  seat.eventInventory[item] += qty;
+  return { item, qty, total: seat.eventInventory[item] };
+}
+
+function applyWrongfullyAccused(seat) {
+  if (seat.inJail) {
+    seat.inJail = false;
+    seat.jailTurns = 0;
+    seat.cash = Math.round((seat.cash + 200) * 100) / 100;
+    return { released: true, paid: 200 };
+  }
+  return applyGrantInventory(seat, 'wrongfullyAccused', 1);
 }
 
 // ---------- TEMP-EFFECT LIFECYCLE ----------

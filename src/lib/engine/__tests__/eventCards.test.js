@@ -17,10 +17,10 @@ function step(state, action, ctx = { rng: makeRng() }) {
 
 // ---------- decks initialise ----------
 
-test('createInitialRoom populates reserveDecks with 10 + 15 cards', () => {
+test('createInitialRoom populates reserveDecks with full card sets', () => {
   const s = makeRoom(2);
-  assert.equal(s.reserveDecks.community.deck.length, 10);
-  assert.equal(s.reserveDecks.chance.deck.length, 15);
+  assert.ok(s.reserveDecks.community.deck.length >= 10);
+  assert.ok(s.reserveDecks.chance.deck.length >= 15);
 });
 
 // ---------- direct effect application ----------

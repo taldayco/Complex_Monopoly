@@ -5,7 +5,6 @@ import { makeRoom, makeRng } from './helpers.js';
 import {
   calcLoanOptions,
   getTierByScore,
-  MAX_LINE_BY_TIER,
   LOAN_TERMS,
   MISSED_PAYMENT_CREDIT_PENALTY
 } from '../../shared/reserve/loanCatalog.js';
@@ -19,7 +18,10 @@ function step(state, action, ctx = { rng: makeRng() }) {
 // ---------- catalog ----------
 
 test('getTierByScore returns correct tier for boundaries', () => {
-  assert.equal(getTierByScore(0).name, 'Poor');
+  assert.equal(getTierByScore(0).name, 'Very Poor');
+  assert.equal(getTierByScore(300).name, 'Very Poor');
+  assert.equal(getTierByScore(349).name, 'Very Poor');
+  assert.equal(getTierByScore(350).name, 'Poor');
   assert.equal(getTierByScore(579).name, 'Poor');
   assert.equal(getTierByScore(580).name, 'Fair');
   assert.equal(getTierByScore(669).name, 'Fair');
@@ -28,6 +30,7 @@ test('getTierByScore returns correct tier for boundaries', () => {
   assert.equal(getTierByScore(740).name, 'Very Good');
   assert.equal(getTierByScore(799).name, 'Very Good');
   assert.equal(getTierByScore(800).name, 'Excellent');
+  assert.equal(getTierByScore(850).name, 'Excellent');
 });
 
 test('calcLoanOptions returns 3 term offers, dice raises PTR monotonically', () => {
@@ -46,12 +49,21 @@ test('calcLoanOptions returns null for Poor tier (no eligibility)', () => {
 
 // ---------- request / accept / decline ----------
 
-test('requestLoan: rejects amount over max line', () => {
+test('requestLoan: rejects amount over dynamic max line', () => {
   const s = makeRoom(2);
-  s.seats[0].creditScore = 720; // Good tier → max $250
-  const r = reducer(s, { type: 'requestLoan', seat: 0, amount: 500 }, { rng: makeRng() });
+  s.seats[0].creditScore = 720;
+  s.seats[0].cash = 200;
+  const r = reducer(s, { type: 'requestLoan', seat: 0, amount: 5000 }, { rng: makeRng() });
   assert.equal(r.ok, false);
-  assert.equal(r.error, 'OVER_MAX_LINE');
+  assert.equal(r.error, 'EXCEEDS_MAX_LINE');
+});
+
+test('requestLoan: rejects principal below $100 minimum', () => {
+  const s = makeRoom(2);
+  s.seats[0].creditScore = 720;
+  const r = reducer(s, { type: 'requestLoan', seat: 0, amount: 50 }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'PRINCIPAL_BELOW_MIN');
 });
 
 test('requestLoan: rejects sub-zero amount', () => {

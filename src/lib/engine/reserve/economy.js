@@ -1,0 +1,140 @@
+import {
+  BASE_INF_INT_DECK,
+  INF_INT_WILDCARD_POOL,
+  STARTING_RESERVE_RATE,
+  RESERVE_FLOOR,
+  STARTING_INFLATION,
+  ECONOMY_HISTORY_CAP
+} from '../../shared/reserve/economyCatalog.js';
+
+export function createEconomyState(rngSeed = 0) {
+  const econ = {
+    reserveRate: STARTING_RESERVE_RATE,
+    inflationFactor: STARTING_INFLATION,
+    deck: [],
+    wildPool: [],
+    history: [],
+    lastFlip: null,
+    round: 0
+  };
+  buildInitialDeckSeeded(econ, rngSeed);
+  return econ;
+}
+
+export function hydrateEconomy(econ, rngSeed = 0) {
+  if (!econ || typeof econ !== 'object') return createEconomyState(rngSeed);
+  if (typeof econ.reserveRate !== 'number') econ.reserveRate = STARTING_RESERVE_RATE;
+  if (typeof econ.inflationFactor !== 'number' || econ.inflationFactor <= 0) {
+    econ.inflationFactor = STARTING_INFLATION;
+  }
+  if (!Array.isArray(econ.deck)) econ.deck = [];
+  if (!Array.isArray(econ.wildPool)) econ.wildPool = [];
+  if (!Array.isArray(econ.history)) econ.history = [];
+  if (typeof econ.round !== 'number') econ.round = 0;
+  if (econ.lastFlip === undefined) econ.lastFlip = null;
+  if (econ.deck.length === 0 && econ.wildPool.length === 0) {
+    buildInitialDeckSeeded(econ, rngSeed);
+  }
+  return econ;
+}
+
+function shuffle(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function pickRandomWildcards(rng) {
+  const n = INF_INT_WILDCARD_POOL.length;
+  const a = INF_INT_WILDCARD_POOL[Math.floor(rng() * n)];
+  const b = INF_INT_WILDCARD_POOL[Math.floor(rng() * n)];
+  return [{ ...a }, { ...b }];
+}
+
+function buildDeckFor(rng) {
+  const wilds = pickRandomWildcards(rng);
+  const cards = [
+    ...BASE_INF_INT_DECK.map((c) => ({ inf: c.inf, int: c.int, wild: false })),
+    ...wilds.map((c) => ({ inf: c.inf, int: c.int, wild: true }))
+  ];
+  shuffle(cards, rng);
+  return { deck: cards, wildPool: wilds };
+}
+
+function buildInitialDeckSeeded(econ, rngSeed) {
+  let s = ((rngSeed | 0) ^ (0x9e3779b1 * 17)) >>> 0;
+  const rand = () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 0x100000000;
+  };
+  const built = buildDeckFor(rand);
+  econ.deck = built.deck;
+  econ.wildPool = built.wildPool;
+}
+
+function ensureDeck(econ, rng) {
+  if (econ.deck.length > 0) return false;
+  const built = buildDeckFor(rng);
+  econ.deck = built.deck;
+  econ.wildPool = built.wildPool;
+  return true;
+}
+
+function drawTopCard(econ, rng) {
+  const reshuffled = ensureDeck(econ, rng);
+  if (econ.deck.length === 0) return { card: null, reshuffled };
+  return { card: econ.deck.shift(), reshuffled };
+}
+
+function pushHistory(econ, entry) {
+  econ.history.push(entry);
+  if (econ.history.length > ECONOMY_HISTORY_CAP) {
+    econ.history.splice(0, econ.history.length - ECONOMY_HISTORY_CAP);
+  }
+}
+
+export function flipEconomy(econ, rng, now = Date.now()) {
+  const { card, reshuffled } = drawTopCard(econ, rng);
+  if (!card) {
+    return { card: null, intIgnored: false, reshuffled, reserveRate: econ.reserveRate, inflationFactor: econ.inflationFactor };
+  }
+
+  const proposedRate = econ.reserveRate + card.int;
+  let intIgnored = false;
+  if (proposedRate < RESERVE_FLOOR) {
+    intIgnored = true;
+    econ.reserveRate = RESERVE_FLOOR;
+  } else {
+    econ.reserveRate = round4(proposedRate);
+  }
+
+  econ.inflationFactor = Math.max(0.01, round4(econ.inflationFactor + card.inf));
+
+  econ.round += 1;
+
+  const entry = {
+    inf: card.inf,
+    int: card.int,
+    wild: !!card.wild,
+    intIgnored,
+    reserveRate: econ.reserveRate,
+    inflationFactor: econ.inflationFactor
+  };
+  pushHistory(econ, entry);
+
+  econ.lastFlip = {
+    at: now,
+    card: { inf: card.inf, int: card.int, wild: !!card.wild },
+    intIgnored,
+    reserveRate: econ.reserveRate,
+    inflationFactor: econ.inflationFactor,
+    reshuffled
+  };
+  return { card, intIgnored, reshuffled, reserveRate: econ.reserveRate, inflationFactor: econ.inflationFactor };
+}
+
+function round4(n) {
+  return Math.round(n * 10000) / 10000;
+}

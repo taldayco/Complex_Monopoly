@@ -25,10 +25,9 @@ test('priming builds an FP500 history with matching length', () => {
   assert.equal(s.market[FP500_SYMBOL].history.length, 1 + TICKS);
 });
 
-test('priming does NOT touch round/cycle/lastFlip', () => {
+test('priming does NOT touch round/lastFlip', () => {
   const s = createStocksState(42);
   assert.equal(s.round, 0);
-  assert.equal(s.cycle, 0);
   assert.equal(s.lastFlip, null);
 });
 

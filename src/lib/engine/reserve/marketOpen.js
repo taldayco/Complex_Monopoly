@@ -103,7 +103,6 @@ export function applyMarketOpenTick(state, now = Date.now()) {
     }
   }
   state.stocks.round = (state.stocks.round ?? 0) + 1;
-  state.stocks.cycle = (state.stocks.cycle ?? 0) + 1;
   state.stocks.lastFlip = { at: now, results: frame.results };
 
   mo.ticksFired += 1;

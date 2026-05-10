@@ -32,5 +32,7 @@ export const CHANCE_CARDS = [
   { id: 'CH15', text: 'You have been elected Chairman of the Board. Pay each player $50.',
     effect: { kind: 'payEachPlayer', amount: 50 } },
   { id: 'CH16', text: 'Your building loan matures. Collect $150.',
-    effect: { kind: 'collect', amount: 150 } }
+    effect: { kind: 'collect', amount: 150 } },
+  { id: 'CH17', text: 'Financial disaster! Every player\'s bank balances are wiped above the FDIC cap.',
+    effect: { kind: 'fdicDisaster' } }
 ];

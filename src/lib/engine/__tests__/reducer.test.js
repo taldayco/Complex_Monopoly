@@ -75,10 +75,8 @@ test('rent: landing on owned property pays rent', () => {
   s.seats[0].position = 39;
   const rng = () => 0; // 1+1 = doubles, total 2, advances to 1 (Mediterranean), passes GO
   s = step(s, { type: 'rollDice', seat: 0 }, { rng });
-  // P0 lands on Mediterranean owned by P1. Rent=2 (no monopoly).
-  // P0 should have cash 1500 + 200 (GO) - 2 = 1698
   assert.equal(s.seats[0].position, 1);
-  assert.equal(s.seats[0].cash, 1500 + 200 - 2);
+  assert.equal(s.seats[0].cash, 1500 + 100 - 2);
   assert.equal(s.seats[1].cash, 1500 + 2);
 });
 
@@ -103,7 +101,7 @@ test('end turn advances to next player', () => {
 
 test('end turn with doubles allows another roll', () => {
   let s = makeRoom(2);
-  s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 3], doublesCount: 1 };
+  s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 3], lastRollWasDoubles: true, doublesCount: 1 };
   s = step(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
   assert.equal(s.turn.seat, 0);
   assert.equal(s.turn.phase, 'preRoll');
@@ -114,8 +112,46 @@ test('passing GO collects $200', () => {
   s.seats[0].position = 38;
   const rng = () => 0.34; // 3 + 3 = doubles, total 6 → wraps to 4 (Market Open)
   s = step(s, { type: 'rollDice', seat: 0 }, { rng });
-  // Position 38 + 6 = 44, mod 40 = 4. passedGo=true (since 38+6 >= 40).
-  // Tile 4 is now Market Open (no tax debit), so cash: 1500 + 200 (GO) = 1700.
   assert.equal(s.seats[0].position, 4);
-  assert.equal(s.seats[0].cash, 1700);
+  assert.equal(s.seats[0].cash, 1600);
+});
+
+test('original doubles + utility-card overwrite still grants the bonus turn', () => {
+  let s = makeRoom(2);
+  s.turn = {
+    seat: 0,
+    phase: 'endable',
+    lastRoll: [3, 4],
+    lastRollWasDoubles: true,
+    doublesCount: 1
+  };
+  s = step(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
+  assert.equal(s.turn.seat, 0, 'same seat — bonus turn');
+  assert.equal(s.turn.phase, 'preRoll');
+});
+
+test('non-doubles original + utility-card rolling accidental doubles does NOT grant bonus', () => {
+  let s = makeRoom(2);
+  s.turn = {
+    seat: 0,
+    phase: 'endable',
+    lastRoll: [4, 4],
+    lastRollWasDoubles: false,
+    doublesCount: 0
+  };
+  s = step(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
+  assert.notEqual(s.turn.seat, 0, 'turn advanced — no bonus');
+});
+
+test('jail-exit doubles do NOT grant a bonus turn at end of turn', () => {
+  let s = makeRoom(2);
+  s.turn = {
+    seat: 0,
+    phase: 'endable',
+    lastRoll: [5, 5],
+    lastRollWasDoubles: false,
+    doublesCount: 0
+  };
+  s = step(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
+  assert.notEqual(s.turn.seat, 0, 'turn advanced — no jail-doubles bonus');
 });

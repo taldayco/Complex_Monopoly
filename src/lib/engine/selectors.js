@@ -33,6 +33,27 @@ export function ownedUtilityCount(state, seatIndex) {
   return UTILITY_INDICES.filter((i) => state.properties[i]?.ownerSeat === seatIndex).length;
 }
 
+export function countOwnedProperties(state, seatIndex) {
+  let count = 0;
+  for (const idx of Object.keys(state.properties ?? {})) {
+    if (state.properties[idx]?.ownerSeat === seatIndex) count += 1;
+  }
+  return count;
+}
+
+export function countOwnedDevelopments(state, seatIndex) {
+  let total = 0;
+  for (const idx of Object.keys(state.properties ?? {})) {
+    const prop = state.properties[idx];
+    if (prop?.ownerSeat !== seatIndex) continue;
+    const h = prop.houses ?? 0;
+    if (h === 0) continue;
+    if (h === 5) total += 3;
+    else total += h;
+  }
+  return total;
+}
+
 // Net worth of a seat (cash + property prices + house investment, minus mortgage drawdowns).
 // Used for deciding who wins on tie/bankruptcy edge cases. Houses sell back at half cost.
 export function netWorth(state, seatIndex) {

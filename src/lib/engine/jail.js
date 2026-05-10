@@ -1,5 +1,6 @@
 import { JAIL_INDEX, JAIL_FINE, JAIL_MAX_TURNS } from '../shared/constants.js';
 import { rollDice } from './movement.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 
 export function sendToJail(seat) {
   seat.position = JAIL_INDEX;
@@ -7,17 +8,49 @@ export function sendToJail(seat) {
   seat.jailTurns = 0;
 }
 
-// Returns { released, mustPay, error }.
-// strategy: "roll" = attempt doubles; "pay" = pay $50; "card" = use jail-free card.
+export function sendToJailWithSeizure(state, seatIndex) {
+  const seat = state.seats[seatIndex];
+  sendToJail(seat);
+  const choices = ownedSeizableSpaceIndices(state, seatIndex);
+  if (choices.length > 0) {
+    state.pendingJailSeizureChoice = { seat: seatIndex, choices };
+    return { jailed: true, seizureRequired: true, choices };
+  }
+  return { jailed: true, seizureRequired: false };
+}
+
+export function ownedSeizableSpaceIndices(state, seatIndex) {
+  const result = [];
+  for (const idx of Object.keys(state.properties ?? {})) {
+    const prop = state.properties[idx];
+    if (prop?.ownerSeat === seatIndex) result.push(Number(idx));
+  }
+  return result;
+}
+
+export function seizePropertyToBank(state, seatIndex, spaceIndex) {
+  const prop = state.properties[spaceIndex];
+  if (!prop || prop.ownerSeat !== seatIndex) return { error: 'NOT_OWNER' };
+  prop.ownerSeat = null;
+  prop.mortgaged = false;
+  prop.houses = 0;
+  return { ok: true, spaceIndex };
+}
+
+export function jailFine(state) {
+  return inflatedPrice(state, JAIL_FINE);
+}
+
 export function attemptJailExit(state, seat, strategy, rng) {
   if (!seat.inJail) return { error: 'NOT_IN_JAIL' };
+  const fine = jailFine(state);
 
   if (strategy === 'pay') {
-    if (seat.cash < JAIL_FINE) return { error: 'INSUFFICIENT_FUNDS' };
-    seat.cash -= JAIL_FINE;
+    if (seat.cash < fine) return { error: 'INSUFFICIENT_FUNDS' };
+    seat.cash = Math.round((seat.cash - fine) * 100) / 100;
     seat.inJail = false;
     seat.jailTurns = 0;
-    return { released: true };
+    return { released: true, fine };
   }
 
   if (strategy === 'card') {
@@ -45,16 +78,15 @@ export function attemptJailExit(state, seat, strategy, rng) {
       return { released: true, roll };
     }
     if (seat.jailTurns >= JAIL_MAX_TURNS) {
-      // Must pay $50 to leave on third failed attempt; if can't, it's bankruptcy time.
-      if (seat.cash < JAIL_FINE) {
-        return { released: false, mustPay: true, roll, insolvent: true };
+      if (seat.cash < fine) {
+        return { released: false, mustPay: true, roll, insolvent: true, fine };
       }
-      seat.cash -= JAIL_FINE;
+      seat.cash = Math.round((seat.cash - fine) * 100) / 100;
       seat.inJail = false;
       seat.jailTurns = 0;
-      return { released: true, mustPay: true, roll };
+      return { released: true, mustPay: true, roll, fine };
     }
-    return { released: false, roll };
+    return { released: false, roll, fine };
   }
 
   return { error: 'UNKNOWN_STRATEGY' };

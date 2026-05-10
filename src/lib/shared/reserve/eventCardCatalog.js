@@ -84,6 +84,60 @@ export const RESERVE_COMMUNITY_DECK = [
     name: 'Promotional Rate',
     blurb: 'Next loan offered at 0% PTR (3 turns).',
     effects: [{ kind: 'tempEffect', effectId: 'zeroInterestNextLoan', turns: 3 }]
+  },
+  {
+    id: 'cmty.lifeInsurance',
+    name: 'Life Insurance Loophole',
+    blurb: 'Doctors revive you. Claim your life insurance: receive $200.',
+    effects: [{ kind: 'cash', amount: 200 }]
+  },
+  {
+    id: 'cmty.maintenanceBill',
+    name: 'Maintenance Bill',
+    blurb: 'Pay $25 per house and $75 per hotel.',
+    effects: [{ kind: 'maintenanceBill', perHouse: 25, perHotel: 75 }]
+  },
+  {
+    id: 'cmty.taxAppealApproved',
+    name: 'Property Tax Appeal Approved',
+    blurb: 'Receive $25 for each developed property you own.',
+    effects: [{ kind: 'taxAppeal', perDevelopedProperty: 25 }]
+  },
+  {
+    id: 'cmty.contractorDiscount',
+    name: 'Contractor Discount',
+    blurb: 'Your next development costs 25% less.',
+    effects: [{ kind: 'devModifier', amount: -0.25 }]
+  },
+  {
+    id: 'cmty.contractorOverrun',
+    name: 'Contractor Overrun',
+    blurb: 'Your next development costs 25% more.',
+    effects: [{ kind: 'devModifier', amount: 0.25 }]
+  },
+  {
+    id: 'cmty.permitClerkLikesYou',
+    name: 'Permit Clerk Likes You',
+    blurb: 'Your next development permit fee is reduced by 50%.',
+    effects: [{ kind: 'permitFeeModifier', amount: -0.5 }]
+  },
+  {
+    id: 'cmty.cityGrant',
+    name: 'City Grant',
+    blurb: 'Build one house at 50% cost.',
+    effects: [{ kind: 'devModifier', amount: -0.5, oneHouseOnly: true }]
+  },
+  {
+    id: 'cmty.avoidJail',
+    name: 'Avoid Jail',
+    blurb: 'Keep until used. Avoid going to jail.',
+    effects: [{ kind: 'grantInventory', item: 'avoidJail', qty: 1 }]
+  },
+  {
+    id: 'cmty.wrongfullyAccused',
+    name: 'Wrongfully Accused',
+    blurb: 'If in jail, leave immediately and receive $200. Else keep until used.',
+    effects: [{ kind: 'wrongfullyAccused' }]
   }
 ];
 
@@ -183,6 +237,123 @@ export const RESERVE_CHANCE_DECK = [
     name: 'Insider Tip — BORR',
     blurb: 'A whisper from the trading floor reveals BORR’s next two wildcards. Only you see it.',
     effects: [{ kind: 'revealWildcards', symbol: 'BORR' }]
+  },
+  {
+    id: 'chance.recoveryRally20',
+    name: 'Recovery Rally',
+    blurb: 'All stocks rise 20%.',
+    effects: [{ kind: 'marketShock', pct: 20 }]
+  },
+  {
+    id: 'chance.marketEuphoria',
+    name: 'Market Euphoria',
+    blurb: 'All stocks rise 40%. Inflation rises 0.3%.',
+    effects: [
+      { kind: 'marketShock', pct: 40 },
+      { kind: 'inflationDelta', amount: 0.003 }
+    ]
+  },
+  {
+    id: 'chance.dividendSeason',
+    name: 'Dividend Season',
+    blurb: 'Each stock pays 5% per share owned.',
+    effects: [{ kind: 'dividendAll', pct: 0.05 }]
+  },
+  {
+    id: 'chance.shortSqueeze',
+    name: 'Short Squeeze',
+    blurb: 'The worst-performing stock immediately rises 100%.',
+    effects: [{ kind: 'shortSqueeze', pct: 100 }]
+  },
+  {
+    id: 'chance.cheapOilDrop75',
+    name: 'Cheap Oil',
+    blurb: 'RRRD and BORR both fall 75%.',
+    effects: [
+      { kind: 'stockShock', symbol: 'RRRD', pct: -75 },
+      { kind: 'stockShock', symbol: 'BORR', pct: -75 }
+    ]
+  },
+  {
+    id: 'chance.carsExpensive50',
+    name: 'Cars Are Too Expensive',
+    blurb: 'RRRD and BORR rise 50%.',
+    effects: [
+      { kind: 'stockShock', symbol: 'RRRD', pct: 50 },
+      { kind: 'stockShock', symbol: 'BORR', pct: 50 }
+    ]
+  },
+  {
+    id: 'chance.infrastructure30',
+    name: 'Infrastructure Bill Passes',
+    blurb: 'RRRD and BORR rise 30%.',
+    effects: [
+      { kind: 'stockShock', symbol: 'RRRD', pct: 30 },
+      { kind: 'stockShock', symbol: 'BORR', pct: 30 }
+    ]
+  },
+  {
+    id: 'chance.consumerNostalgia75',
+    name: 'Consumer Nostalgia Boom',
+    blurb: 'MNCL rises 75%.',
+    effects: [{ kind: 'stockShock', symbol: 'MNCL', pct: 75 }]
+  },
+  {
+    id: 'chance.caneCrash150',
+    name: 'CANE Insurance Removed',
+    blurb: 'CANE crashes 150%.',
+    effects: [{ kind: 'stockShock', symbol: 'CANE', pct: -150 }]
+  },
+  {
+    id: 'chance.stimulus',
+    name: 'Stimulus Checks',
+    blurb: 'Every player receives $300. Inflation rises 0.5%.',
+    effects: [
+      { kind: 'cashAllSeats', amount: 300 },
+      { kind: 'inflationDelta', amount: 0.005 }
+    ]
+  },
+  {
+    id: 'chance.classEnvy',
+    name: 'Class Envy',
+    blurb: 'The richest player pays $100 to the poorest player.',
+    effects: [{ kind: 'classEnvy', amount: 100 }]
+  },
+  {
+    id: 'chance.antitrust',
+    name: 'Antitrust Investigation',
+    blurb: 'Any player owning a full color group pays $200.',
+    effects: [{ kind: 'antitrust', amount: 200 }]
+  },
+  {
+    id: 'chance.boardwalkScandal',
+    name: 'Boardwalk Scandal',
+    blurb: 'Boardwalk customers lose $100 unless Excellent credit.',
+    effects: [{ kind: 'boardwalkScandal', amount: 100 }]
+  },
+  {
+    id: 'chance.lendingTighten',
+    name: 'Lending Standards Tighten',
+    blurb: 'Loan max sizes are reduced 50% until your next turn.',
+    effects: [{ kind: 'tempEffect', effectId: 'maxLoanHalved', turns: 1 }]
+  },
+  {
+    id: 'chance.creditCrunch',
+    name: 'Credit Crunch',
+    blurb: 'Until your next turn, Fair-credit players cannot apply for standard loans.',
+    effects: [{ kind: 'tempEffect', effectId: 'fairCreditBlocked', turns: 1 }]
+  },
+  {
+    id: 'chance.predatoryLawsuit',
+    name: 'Predatory Lending Lawsuit',
+    blurb: 'The player with the most active loans receives +20 credit and $200.',
+    effects: [{ kind: 'predatoryLawsuit', creditDelta: 20, cashAmount: 200 }]
+  },
+  {
+    id: 'chance.regionalBankFailure',
+    name: 'Regional Bank Failure',
+    blurb: 'Roll a die. Odd = MMCU affected. Even = Boardwalk. Balances above FDIC limits are lost.',
+    effects: [{ kind: 'regionalBankFailure' }]
   }
 ];
 

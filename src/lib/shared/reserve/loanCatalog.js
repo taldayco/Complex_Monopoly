@@ -1,46 +1,51 @@
-// Loan pricing & credit-tier reference data, ported from the reserve project.
-// Pure constants + helpers — usable on client and server.
-
 export const CREDIT_TIERS = [
-  { name: 'Poor', min: 0 },
-  { name: 'Fair', min: 580 },
-  { name: 'Good', min: 670 },
-  { name: 'Very Good', min: 740 },
-  { name: 'Excellent', min: 800 }
+  { name: 'Very Poor', min: 300, max: 349 },
+  { name: 'Poor', min: 350, max: 579 },
+  { name: 'Fair', min: 580, max: 669 },
+  { name: 'Good', min: 670, max: 739 },
+  { name: 'Very Good', min: 740, max: 799 },
+  { name: 'Excellent', min: 800, max: 850 }
 ];
 
 export const TIER_BY_NAME = Object.fromEntries(CREDIT_TIERS.map((t) => [t.name, t]));
 
-// Maximum new-loan principal a seat is eligible for, by tier.
-export const MAX_LINE_BY_TIER = {
+export const TIER_MULTIPLIER_FOR_LINE = {
+  'Very Poor': 0,
   Poor: 0,
-  Fair: 100,
-  Good: 250,
-  'Very Good': 500,
-  Excellent: 1000
+  Fair: 1.5,
+  Good: 1.75,
+  'Very Good': 2.0,
+  Excellent: 2.25
 };
 
-// Available repayment term lengths (turns).
 export const LOAN_TERMS = [3, 5, 8];
 
-// Base per-turn rate (decimal) by tier and term. Longer terms get a slightly
-// lower per-turn rate to compensate for the larger total interest paid.
-export const BASE_PTR_BY_TIER_TERM = {
-  Fair:        { 3: 0.08,  5: 0.07,   8: 0.06 },
-  Good:        { 3: 0.06,  5: 0.05,   8: 0.04 },
-  'Very Good': { 3: 0.05,  5: 0.04,   8: 0.03 },
-  Excellent:   { 3: 0.03,  5: 0.025,  8: 0.02 }
+export const PTR_BY_TIER_AND_DICE = {
+  Excellent:   [0.03, 0.035, 0.04,  0.045, 0.05,  0.055],
+  'Very Good': [0.06, 0.065, 0.07,  0.075, 0.08,  0.085],
+  Good:        [0.09, 0.095, 0.10,  0.105, 0.11,  0.115],
+  Fair:        [0.10, 0.11,  0.12,  0.13,  0.14,  0.15]
 };
 
-// Each pip of the dice roll adds this to the PTR. Roll 1 = +0%, roll 6 = +2%.
-// Lower roll = better rate; the dice add controlled randomness on top of tier.
-export const LOAN_DICE_MODIFIER_PER_PIP = 0.004;
+export const TERM_PREMIUM = { 3: 0, 5: 0.01, 8: 0.02 };
 
-// Credit-score penalty for a missed installment.
+export const STANDARD_LOAN_MIN_PRINCIPAL = 100;
+export const STANDARD_LOANS_PER_TURN = 5;
+export const STANDARD_LOAN_APPLY_CREDIT_PENALTY = 50;
+export const STANDARD_LOAN_ANTI_HACK_BONUS = 5;
+
 export const MISSED_PAYMENT_CREDIT_PENALTY = 10;
 
-// Minimum credit score (floor for penalties).
 export const MIN_CREDIT_SCORE = 300;
+export const MAX_CREDIT_SCORE = 850;
+export const BANKRUPTCY_FLOOR = 350;
+
+export function clampCreditScore(score) {
+  if (typeof score !== 'number' || !Number.isFinite(score)) return MIN_CREDIT_SCORE;
+  if (score < MIN_CREDIT_SCORE) return MIN_CREDIT_SCORE;
+  if (score > MAX_CREDIT_SCORE) return MAX_CREDIT_SCORE;
+  return score;
+}
 
 export function getTierByScore(score) {
   if (typeof score !== 'number') return CREDIT_TIERS[0];
@@ -51,25 +56,59 @@ export function getTierByScore(score) {
   return tier;
 }
 
-export function getMaxLine(score) {
-  return MAX_LINE_BY_TIER[getTierByScore(score).name] ?? 0;
+export function sumOpenBankBalances(seat) {
+  const accts = seat?.bankAccounts;
+  if (!accts) return 0;
+  let sum = 0;
+  for (const key of Object.keys(accts)) {
+    const a = accts[key];
+    if (a?.open && typeof a.balance === 'number') sum += a.balance;
+  }
+  return Math.round(sum * 100) / 100;
 }
 
-// Compute the three term options for a given seat score, principal, and dice
-// roll. Returns null if the seat is below the eligibility floor (Poor tier).
-//   { tier, maxLine, options: [{ term, ptr, totalDebt, installment }, …] }
-export function calcLoanOptions(score, principal, roll) {
+export function sumActiveLoanBalances(seat) {
+  let sum = 0;
+  for (const l of seat?.loans ?? []) {
+    if (l?.status === 'active' && typeof l.balance === 'number' && l.balance > 0) sum += l.balance;
+  }
+  for (const l of seat?.mortgageLoans ?? []) {
+    if (l?.status === 'active' && typeof l.balance === 'number' && l.balance > 0) sum += l.balance;
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+export function calcMaxStandardLoan(seat, opts = {}) {
+  const score = seat?.creditScore ?? 0;
   const tier = getTierByScore(score);
-  if (tier.name === 'Poor') return null;
-  const maxLine = MAX_LINE_BY_TIER[tier.name] ?? 0;
+  const mult = TIER_MULTIPLIER_FOR_LINE[tier.name] ?? 0;
+  if (mult === 0) return 0;
+  const cash = typeof seat?.cash === 'number' ? seat.cash : 0;
+  const base = Math.max(0, cash + sumOpenBankBalances(seat) - sumActiveLoanBalances(seat));
+  let raw = base * mult;
+  if (typeof opts.cardLineBonus === 'number' && opts.cardLineBonus > 0) {
+    raw *= 1 + opts.cardLineBonus;
+  }
+  if (typeof opts.tempBoost === 'number' && opts.tempBoost > 0) {
+    raw *= 1 + opts.tempBoost;
+  }
+  return Math.round(raw / 50) * 50;
+}
+
+export function calcLoanOptions(score, principal, roll, opts = {}) {
+  const tier = getTierByScore(score);
+  if (tier.name === 'Poor' || tier.name === 'Very Poor') return null;
   const r = Math.max(1, Math.min(6, Math.floor(roll)));
-  const dieMod = (r - 1) * LOAN_DICE_MODIFIER_PER_PIP;
+  const baseRate = PTR_BY_TIER_AND_DICE[tier.name][r - 1];
+  const reserveRate = typeof opts.reserveRate === 'number' ? opts.reserveRate : 0;
+  const boardwalkDiscount = typeof opts.boardwalkDiscount === 'number' ? opts.boardwalkDiscount : 0;
+  const tempRateDiscount = typeof opts.tempRateDiscount === 'number' ? opts.tempRateDiscount : 0;
   const options = LOAN_TERMS.map((term) => {
-    const base = BASE_PTR_BY_TIER_TERM[tier.name][term];
-    const ptr = Math.round((base + dieMod) * 10000) / 10000;
+    const raw = baseRate + TERM_PREMIUM[term] + reserveRate - boardwalkDiscount - tempRateDiscount;
+    const ptr = Math.max(0, Math.round(raw * 10000) / 10000);
     const totalDebt = Math.round(principal * (1 + ptr * term) * 100) / 100;
     const installment = Math.round((totalDebt / term) * 100) / 100;
     return { term, ptr, totalDebt, installment };
   });
-  return { tier, maxLine, options };
+  return { tier, options };
 }

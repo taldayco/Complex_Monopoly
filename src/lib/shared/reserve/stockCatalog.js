@@ -87,7 +87,3 @@ export const STOCK_CATALOG = {
 
 // Cap on how many price points to retain per stock for charting.
 export const STOCK_HISTORY_CAP = 100;
-
-// In auto-banker rooms the market flips automatically after this many
-// completed turns (counted across all seats).
-export const AUTO_FLIP_EVERY_N_TURNS = 4;

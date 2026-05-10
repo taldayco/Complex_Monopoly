@@ -66,10 +66,7 @@ test('reshuffle clears stale wildcard reveals on all seats', () => {
   // Plant a fake reveal on seat 0 for TPHT.
   s.seats[0].revealedWildcards = { TPHT: [-100, 100] };
   s.seats[1].revealedWildcards = { TPHT: [-100, 100], MNCL: [50, 50] };
-  // Drain TPHT's deck so the next flip triggers a reshuffle on TPHT only.
   s.stocks.market.TPHT.deck = [];
-  // Force the auto-flip path: hit the cycle boundary, then end a turn so reducer flips.
-  s.stocks.cycle = 3; // next endTurn bumps to 4 → triggers flipMarket
   s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
   const r = reducer(s, { type: 'endTurn', seat: 0 }, { rng: makeRng(42) });
   assert.equal(r.ok, true);

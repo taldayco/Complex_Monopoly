@@ -5,8 +5,7 @@ import { makeRoom, makeRng } from './helpers.js';
 import {
   STOCK_CATALOG,
   VOLATILE_STOCK_ORDER,
-  FP500_SYMBOL,
-  AUTO_FLIP_EVERY_N_TURNS
+  FP500_SYMBOL
 } from '../../shared/reserve/stockCatalog.js';
 import { createStocksState, flipMarket, buyShares, sellShares, recalcFP500 } from '../reserve/stocks.js';
 
@@ -89,22 +88,33 @@ test('reducer rejects removed manual-banker actions', () => {
   assert.equal(r.error, 'UNKNOWN_ACTION');
 });
 
-test('the market flips every AUTO_FLIP_EVERY_N_TURNS turns', () => {
+test('the market flips on every turn end', () => {
   let s = makeRoom(2);
-  s.stocks.cycle = 0;
   const ctx = { rng: makeRng(99) };
   const initial = { ...Object.fromEntries(VOLATILE_STOCK_ORDER.map((sym) => [sym, s.stocks.market[sym].price])) };
 
-  for (let i = 0; i < AUTO_FLIP_EVERY_N_TURNS; i++) {
-    s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
-    s = step(s, { type: 'endTurn', seat: 0 }, ctx);
-    // After endTurn the next seat's preRoll begins; bring back to seat 0 for next iteration.
-    if (s.turn.seat !== 0) {
-      s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
-    }
-  }
-  // At least one stock should have moved from its initial price.
+  s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
+  s = step(s, { type: 'endTurn', seat: 0 }, ctx);
+
   const moved = VOLATILE_STOCK_ORDER.some((sym) => s.stocks.market[sym].price !== initial[sym]);
-  assert.ok(moved, 'expected at least one stock to flip after auto cadence');
-  assert.ok(s.stocks.cycle >= AUTO_FLIP_EVERY_N_TURNS);
+  assert.ok(moved, 'expected at least one stock to flip after a single end-turn');
+});
+
+test('marketFlip fires once per end-turn (regression)', () => {
+  let s = makeRoom(2);
+  const ctx = { rng: makeRng(99) };
+
+  const flipIndices = [];
+  const totalTurns = 12;
+  for (let i = 1; i <= totalTurns; i++) {
+    s.turn = { seat: s.turn.seat, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
+    const r = reducer(s, { type: 'endTurn', seat: s.turn.seat }, ctx);
+    assert.equal(r.ok, true, 'endTurn should succeed on turn ' + i);
+    s = r.state;
+    if (r.events.some((e) => e.type === 'marketFlip')) flipIndices.push(i);
+  }
+  const expected = [];
+  for (let i = 1; i <= totalTurns; i++) expected.push(i);
+  assert.deepEqual(flipIndices, expected, 'flips must fire on every turn end');
+  assert.equal(s.turnCount, totalTurns, 'turnCount should equal the number of completed turns');
 });

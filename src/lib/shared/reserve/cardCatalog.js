@@ -1,26 +1,15 @@
-// Credit-card catalog ported from the reserve project. Cards are tier-gated;
-// each one charges a signing fee, a per-turn rotating fee, and a cancel fee.
-// Active benefits modify other systems (loans, HYSA, rent, GO collection,
-// development, first-installment coverage) — see the `getXxxFor(seat)`
-// helpers below for the read sites used by the engine.
-
 import {
   CREDIT_TIERS,
   TIER_BY_NAME,
-  MAX_LINE_BY_TIER,
+  TIER_MULTIPLIER_FOR_LINE,
   getTierByScore,
+  sumOpenBankBalances,
+  sumActiveLoanBalances,
   MISSED_PAYMENT_CREDIT_PENALTY
 } from './loanCatalog.js';
 
 const TIER_RANK = Object.fromEntries(CREDIT_TIERS.map((t, i) => [t.name, i]));
 
-// Each card lists the bank that issues it, the up-front signing fee/bonus,
-// a fee charged when the holder passes GO, a cancellation fee, the credit
-// tier required to apply, the minimum credit line provided, the interest
-// rate charged on outstanding card balance every 4 turn rotations, and the
-// minimum per-cycle payment. `rotatingFee` is the legacy flat per-turn fee
-// (kept at 0 — the new interest-on-balance model replaces it but is not yet
-// wired on the engine side).
 export const CARD_CATALOG = {
   readingRail: {
     id: 'readingRail',
@@ -36,10 +25,10 @@ export const CARD_CATALOG = {
     interestRate: 0.30,
     minPayment: 25,
     benefits: {
-      hysaBonus: 0.01,            // +1% HYSA — WIRED
-      railRebate: 0.5,            // bank pays 50% of railroad payments — WIRED
-      utilityRebate: 0.5,         // bank pays 50% of utility payments — WIRED
-      baseRentRebate: 1.0         // bank pays 100% of base rent (no doubles, no developments) — WIRED
+      hysaBonus: 0.01,
+      railRebate: 0.5,
+      utilityRebate: 0.5,
+      baseRentRebate: 1.0
     },
     blurb: '+1% HYSA · bank covers 50% rail/utility · 100% base rent'
   },
@@ -57,9 +46,9 @@ export const CARD_CATALOG = {
     interestRate: 0.28,
     minPayment: 25,
     benefits: {
-      goBonus: 50,                 // +$50 when passing GO without landing — WIRED
-      goLandingBonus: 100,         // +$100 when landing on GO — WIRED
-      otherLandingBonus: 10        // +$10 from bank when player lands on your property — WIRED
+      goBonus: 50,
+      goLandingBonus: 100,
+      otherLandingBonus: 10
     },
     blurb: '+$50 pass GO · +$100 land on GO · +$10 from bank per landing'
   },
@@ -77,8 +66,8 @@ export const CARD_CATALOG = {
     interestRate: 0.26,
     minPayment: 25,
     benefits: {
-      rentRebate: 0.15,            // bank pays 15% of all rent — WIRED
-      developmentRebate: 0.15      // bank pays 15% of house/hotel purchases — WIRED
+      rentRebate: 0.15,
+      developmentRebate: 0.15
     },
     blurb: 'Bank covers 15% of rent/bills · 15% of development costs'
   },
@@ -96,9 +85,9 @@ export const CARD_CATALOG = {
     interestRate: 0.24,
     minPayment: 50,
     benefits: {
-      hysaBonus: 0.02,             // +2% HYSA — WIRED
-      maxLineBonus: 0.4,           // +40% max loan line — WIRED
-      blueGreenRentRebate: 0.5     // bank pays 50% of rent on darkblue/green — WIRED
+      hysaBonus: 0.02,
+      maxLineBonus: 0.4,
+      blueGreenRentRebate: 0.5
     },
     blurb: '+2% HYSA · +40% max loan · bank covers 50% blue/green rent'
   },
@@ -116,8 +105,8 @@ export const CARD_CATALOG = {
     interestRate: 0.22,
     minPayment: 50,
     benefits: {
-      hysaBonus: 0.0125,           // +1.25% HYSA — WIRED
-      ptrDiscount: 0.02            // -2% PTR on new loans — WIRED
+      hysaBonus: 0.0125,
+      ptrDiscount: 0.02
     },
     blurb: '+1.25% HYSA · -2% per-turn rate on new loans'
   },
@@ -135,8 +124,8 @@ export const CARD_CATALOG = {
     interestRate: 0.20,
     minPayment: 100,
     benefits: {
-      missedPaymentPenalty: 5,               // -5 instead of -10 — WIRED
-      bankPaysFirstInstallment: true         // bank covers max of first installment while keeping recovery ≥ principal+$100 — WIRED
+      missedPaymentPenalty: 5,
+      bankPaysFirstInstallment: true
     },
     blurb: 'Bank covers first installment · softer skip-penalty (-5)'
   }
@@ -151,8 +140,37 @@ export const CARD_ORDER = [
   'boardwalkPreferred'
 ];
 
+export const BANK_NAME_TO_CODE = {
+  'MM Credit Union': 'mmcu',
+  'Boardwalk National Bank': 'boardwalk'
+};
+
+export const CREDIT_LINE_INCREASE_PENALTY = 25;
+export const CARD_PAYMENT_CYCLE_TURNS = 4;
+
+export const UTILIZATION_BUCKETS = [
+  { min: 0,    max: 0.30, delta: 5 },
+  { min: 0.30, max: 0.50, delta: 0 },
+  { min: 0.50, max: 0.75, delta: -5 },
+  { min: 0.75, max: Infinity, delta: -10 }
+];
+
+export function utilizationDelta(utilizationPct) {
+  if (typeof utilizationPct !== 'number' || !Number.isFinite(utilizationPct)) return 0;
+  for (const b of UTILIZATION_BUCKETS) {
+    if (utilizationPct >= b.min && utilizationPct < b.max) return b.delta;
+  }
+  return 0;
+}
+
 export function getCard(cardId) {
   return CARD_CATALOG[cardId] ?? null;
+}
+
+export function getCardBankCode(cardId) {
+  const card = CARD_CATALOG[cardId];
+  if (!card) return null;
+  return BANK_NAME_TO_CODE[card.bank] ?? null;
 }
 
 export function meetsTierRequirement(seat, requiredTierName) {
@@ -161,7 +179,6 @@ export function meetsTierRequirement(seat, requiredTierName) {
   return TIER_RANK[seatTier.name] >= TIER_RANK[requiredTierName];
 }
 
-// Iterate active cards on a seat, yielding the catalog entry for each.
 export function* activeCards(seat) {
   if (!Array.isArray(seat?.creditCards)) return;
   for (const c of seat.creditCards) {
@@ -171,23 +188,33 @@ export function* activeCards(seat) {
   }
 }
 
-// ---------- WIRED MODIFIERS ----------
-
-// Maximum loan line for a seat, factoring in card bonuses (multiplicative).
-export function getMaxLineFor(seat) {
-  const score = seat?.creditScore ?? 0;
-  const baseMax = MAX_LINE_BY_TIER[getTierByScore(score).name] ?? 0;
-  let mult = 1;
+function sumActiveCardLineBonus(seat) {
+  let mult = 0;
   for (const card of activeCards(seat)) {
-    if (typeof card.benefits?.maxLineBonus === 'number') {
-      mult *= 1 + card.benefits.maxLineBonus;
-    }
+    if (typeof card.benefits?.maxLineBonus === 'number') mult += card.benefits.maxLineBonus;
   }
-  return Math.round(baseMax * mult);
+  return mult;
 }
 
-// Credit-score penalty for a missed installment. Cards that lower the penalty
-// (Vault Platinum: 5) override the default. The lowest (best) override wins.
+export function calcCreditLine(seat, cardId) {
+  const card = CARD_CATALOG[cardId];
+  if (!card) return 0;
+  const score = seat?.creditScore ?? 0;
+  const tier = getTierByScore(score);
+  const mult = TIER_MULTIPLIER_FOR_LINE[tier.name] ?? 0;
+  const cash = typeof seat?.cash === 'number' ? seat.cash : 0;
+  const base = Math.max(0, cash + sumOpenBankBalances(seat) - sumActiveLoanBalances(seat));
+  let raw = base * mult;
+  const bonus = sumActiveCardLineBonus(seat);
+  if (bonus > 0) raw *= 1 + bonus;
+  const dynamic = Math.round(raw / 10) * 10;
+  return Math.max(dynamic, card.minLine ?? 0);
+}
+
+export function getCardLineBonusFor(seat) {
+  return sumActiveCardLineBonus(seat);
+}
+
 export function getMissedPaymentPenalty(seat) {
   let best = MISSED_PAYMENT_CREDIT_PENALTY;
   for (const card of activeCards(seat)) {
@@ -197,8 +224,13 @@ export function getMissedPaymentPenalty(seat) {
   return best;
 }
 
-// Total PTR discount (decimal) from active cards. Subtracted from the offer
-// PTR at request time, with a floor at 0.
+export function getMissedPaymentPenaltyForCard(cardId) {
+  const card = CARD_CATALOG[cardId];
+  if (!card) return MISSED_PAYMENT_CREDIT_PENALTY;
+  const v = card.benefits?.missedPaymentPenalty;
+  return typeof v === 'number' ? v : MISSED_PAYMENT_CREDIT_PENALTY;
+}
+
 export function getPtrDiscountFor(seat) {
   let total = 0;
   for (const card of activeCards(seat)) {
@@ -209,10 +241,8 @@ export function getPtrDiscountFor(seat) {
   return total;
 }
 
-// Effective HYSA rate: seat's base rate (typically the catalog default) plus
-// every active card's hysaBonus, summed.
 export function getHysaRateFor(seat, baseRate) {
-  const base = typeof seat?.hysaRate === 'number' ? seat.hysaRate : (baseRate ?? 0);
+  const base = baseRate ?? 0;
   let bonus = 0;
   for (const card of activeCards(seat)) {
     if (typeof card.benefits?.hysaBonus === 'number') {
@@ -221,11 +251,6 @@ export function getHysaRateFor(seat, baseRate) {
   }
   return Math.max(0, Math.round((base + bonus) * 10000) / 10000);
 }
-
-// ---------- RENT REBATES ----------
-// Each helper sums applicable rebate fractions across active cards. The reducer
-// composes them additively (capped at 1) and the bank covers the rebated
-// portion — the property owner still receives full rent.
 
 function sumBenefit(seat, key) {
   let total = 0;
@@ -244,26 +269,17 @@ export function getUtilityRebateFor(seat) {
   return sumBenefit(seat, 'utilityRebate');
 }
 
-// readingRail's baseRentRebate only applies when rent IS unimproved single
-// rent — i.e. no houses AND owner does not hold the full color group. The
-// caller must check those preconditions; this helper just sums the fractions.
 export function getBaseRentRebateFor(seat) {
   return sumBenefit(seat, 'baseRentRebate');
 }
 
-// Generic "all rent and bills" rebate (portfolioGold). Stacks additively with
-// other rent rebates.
 export function getGenericRentRebateFor(seat) {
   return sumBenefit(seat, 'rentRebate');
 }
 
-// boardwalkPreferred's blueGreenRentRebate: applies on properties in the
-// `darkblue` or `green` color groups only.
 export function getBlueGreenRentRebateFor(seat) {
   return sumBenefit(seat, 'blueGreenRentRebate');
 }
-
-// ---------- GO BONUSES ----------
 
 export function getGoBonusFor(seat) {
   return sumBenefit(seat, 'goBonus');
@@ -273,24 +289,14 @@ export function getGoLandingBonusFor(seat) {
   return sumBenefit(seat, 'goLandingBonus');
 }
 
-// Bank pays this to the owner each time a player lands on their property.
-// Independent of whether rent is owed (mortgaged owners still get it).
 export function getOtherLandingBonusFor(seat) {
   return sumBenefit(seat, 'otherLandingBonus');
 }
 
-// ---------- DEVELOPMENT ----------
-// Fraction of house/hotel cost that the bank covers. Stacks additively across
-// cards (currently only portfolioGold provides one), capped at 1.
 export function getDevelopmentRebateFor(seat) {
   return Math.min(1, sumBenefit(seat, 'developmentRebate'));
 }
 
-// ---------- LOAN: FIRST INSTALLMENT ----------
-// vaultPlatinum: when paying the first installment of a new loan, the bank
-// covers up to the full installment amount, but the bank's net recovery
-// (totalDebt minus what it covers) must remain at least principal + $100.
-// Returns the dollar amount the bank covers; 0 if no eligible card is active.
 const FIRST_INSTALLMENT_RECOVERY_FLOOR = 100;
 export function getFirstInstallmentCoverageFor(seat, loan) {
   if (!loan || (loan.paymentsMade ?? 0) !== 0) return 0;

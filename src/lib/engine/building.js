@@ -1,19 +1,31 @@
 import { BOARD } from '../shared/board.js';
 import { COLOR_GROUPS } from '../shared/constants.js';
-import { ownsAllInGroup } from './selectors.js';
 import { getDevelopmentRebateFor } from '../shared/reserve/cardCatalog.js';
+import { inflatedPrice } from '../shared/economy/inflation.js';
 
-// Effective house/hotel cost after card-driven development rebates. The bank
-// covers the rebated portion implicitly — no separate accounting needed since
-// houses/hotels are bank-owned inventory.
-function effectiveDevelopmentCost(seat, listedCost) {
+function effectiveDevelopmentCost(state, seat, listedCost) {
+  const inflated = inflatedPrice(state, listedCost);
   const rebate = getDevelopmentRebateFor(seat);
-  if (rebate <= 0) return listedCost;
-  return Math.round(listedCost * (1 - rebate) * 100) / 100;
+  if (rebate <= 0) return inflated;
+  return Math.round(inflated * (1 - rebate) * 100) / 100;
 }
 
-// "Even build" rule: you must build/sell across the color group such that no two properties
-// differ in house count by more than 1.
+export function calcPermitFees(state, seatIndex, spaceIndex, devSubtotal) {
+  const space = BOARD[spaceIndex];
+  if (!space || space.type !== 'property') return { feesByRecipient: new Map(), totalFees: 0 };
+  const feePerProperty = Math.round(devSubtotal * 0.25 * 100) / 100;
+  const feesByRecipient = new Map();
+  let totalFees = 0;
+  for (const i of COLOR_GROUPS[space.colorGroup] ?? []) {
+    if (i === spaceIndex) continue;
+    const owner = state.properties[i]?.ownerSeat;
+    if (owner == null || owner === seatIndex) continue;
+    const cur = feesByRecipient.get(owner) ?? 0;
+    feesByRecipient.set(owner, Math.round((cur + feePerProperty) * 100) / 100);
+    totalFees = Math.round((totalFees + feePerProperty) * 100) / 100;
+  }
+  return { feesByRecipient, totalFees, feePerProperty };
+}
 
 export function canBuyHouse(state, seatIndex, spaceIndex) {
   const space = BOARD[spaceIndex];
@@ -21,37 +33,36 @@ export function canBuyHouse(state, seatIndex, spaceIndex) {
   const prop = state.properties[spaceIndex];
   if (prop.ownerSeat !== seatIndex) return { ok: false, error: 'NOT_OWNER' };
   if (prop.mortgaged) return { ok: false, error: 'MORTGAGED' };
-  if (!ownsAllInGroup(state, seatIndex, space.colorGroup)) return { ok: false, error: 'NO_MONOPOLY' };
   if (prop.houses >= 5) return { ok: false, error: 'AT_HOTEL' };
 
-  // Cannot have any mortgaged property in this color group.
-  for (const i of COLOR_GROUPS[space.colorGroup]) {
-    if (state.properties[i].mortgaged) return { ok: false, error: 'GROUP_MORTGAGED' };
-  }
-
-  // Even-build: target houses on this property would be houses+1.
-  // Every other property in the group must currently have at least houses (>= target - 1).
   const target = prop.houses + 1;
   for (const i of COLOR_GROUPS[space.colorGroup]) {
     if (i === spaceIndex) continue;
+    if (state.properties[i]?.ownerSeat !== seatIndex) continue;
+    if (state.properties[i].mortgaged) return { ok: false, error: 'GROUP_MORTGAGED' };
     if (state.properties[i].houses < target - 1) {
       return { ok: false, error: 'EVEN_BUILD' };
     }
   }
 
-  // Bank inventory.
   if (target === 5) {
     if (state.bank.hotelsAvailable < 1) return { ok: false, error: 'NO_HOTELS' };
   } else {
     if (state.bank.housesAvailable < 1) return { ok: false, error: 'NO_HOUSES' };
   }
 
-  // Cash.
   const seat = state.seats[seatIndex];
-  const cost = effectiveDevelopmentCost(seat, space.houseCost);
-  if (seat.cash < cost) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
+  const cost = effectiveDevelopmentCost(state, seat, space.houseCost);
+  const fees = calcPermitFees(state, seatIndex, spaceIndex, cost);
+  if (seat.cash < cost + fees.totalFees) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
 
-  return { ok: true, cost, listedCost: space.houseCost };
+  return {
+    ok: true,
+    cost,
+    listedCost: space.houseCost,
+    permitFees: fees.totalFees,
+    feesByRecipient: fees.feesByRecipient
+  };
 }
 
 export function buyHouse(state, seatIndex, spaceIndex) {
@@ -62,17 +73,29 @@ export function buyHouse(state, seatIndex, spaceIndex) {
   const seat = state.seats[seatIndex];
   const target = prop.houses + 1;
 
+  for (const [recipientSeat, amount] of check.feesByRecipient.entries()) {
+    const recipient = state.seats[recipientSeat];
+    if (!recipient) continue;
+    seat.cash = Math.round((seat.cash - amount) * 100) / 100;
+    recipient.cash = Math.round((recipient.cash + amount) * 100) / 100;
+  }
+
   if (target === 5) {
-    // Hotel: returns 4 houses to bank, takes 1 hotel.
     state.bank.housesAvailable += 4;
     state.bank.hotelsAvailable -= 1;
   } else {
     state.bank.housesAvailable -= 1;
   }
   prop.houses = target;
-  const cost = effectiveDevelopmentCost(seat, space.houseCost);
-  seat.cash = Math.round((seat.cash - cost) * 100) / 100;
-  return { ok: true, cost, listedCost: space.houseCost, houses: target };
+  seat.cash = Math.round((seat.cash - check.cost) * 100) / 100;
+  return {
+    ok: true,
+    cost: check.cost,
+    listedCost: space.houseCost,
+    houses: target,
+    permitFees: check.permitFees,
+    feesByRecipient: check.feesByRecipient
+  };
 }
 
 export function canSellHouse(state, seatIndex, spaceIndex) {
@@ -82,16 +105,15 @@ export function canSellHouse(state, seatIndex, spaceIndex) {
   if (prop.ownerSeat !== seatIndex) return { ok: false, error: 'NOT_OWNER' };
   if (prop.houses === 0) return { ok: false, error: 'NO_HOUSES' };
 
-  // Even-sell: every other property in the group must have at most current houses (>= target after sell).
   const target = prop.houses - 1;
   for (const i of COLOR_GROUPS[space.colorGroup]) {
     if (i === spaceIndex) continue;
+    if (state.properties[i]?.ownerSeat !== seatIndex) continue;
     if (state.properties[i].houses > target + 1) {
       return { ok: false, error: 'EVEN_SELL' };
     }
   }
 
-  // Hotel sell-back requires 4 houses available in the bank.
   if (prop.houses === 5 && state.bank.housesAvailable < 4) {
     return { ok: false, error: 'NO_HOUSES_IN_BANK' };
   }
@@ -108,7 +130,6 @@ export function sellHouse(state, seatIndex, spaceIndex) {
   const refund = Math.floor(space.houseCost / 2);
 
   if (prop.houses === 5) {
-    // Hotel → 4 houses
     state.bank.hotelsAvailable += 1;
     state.bank.housesAvailable -= 4;
     prop.houses = 4;

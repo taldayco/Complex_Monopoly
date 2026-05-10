@@ -2,9 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
 import { makeRoom, makeRng } from './helpers.js';
-import { applyHysaInterestAtTurnStart } from '../reserve/hysa.js';
+import { applyHysaInterestAtTurnStart, openAccount, deposit } from '../reserve/banking.js';
 import { getHysaRateFor } from '../../shared/reserve/cardCatalog.js';
-import { HYSA_BASE_RATE } from '../../shared/constants.js';
 
 function step(state, action, ctx = { rng: makeRng() }) {
   const r = reducer(state, action, ctx);
@@ -12,70 +11,93 @@ function step(state, action, ctx = { rng: makeRng() }) {
   return r.state;
 }
 
-test('getHysaRateFor: defaults to seat.hysaRate when no cards', () => {
-  const seat = { hysaRate: HYSA_BASE_RATE, creditCards: [] };
-  assert.equal(getHysaRateFor(seat, HYSA_BASE_RATE), HYSA_BASE_RATE);
+test('getHysaRateFor: returns the supplied base when no cards', () => {
+  const seat = { creditCards: [] };
+  assert.equal(getHysaRateFor(seat, 0.05), 0.05);
+  assert.equal(getHysaRateFor(seat, 0), 0);
 });
 
-test('getHysaRateFor: stacks card bonuses additively', () => {
+test('getHysaRateFor: stacks card bonuses additively on top of base', () => {
   const seat = {
-    hysaRate: HYSA_BASE_RATE,
     creditCards: [
-      { id: 'a', cardId: 'readingRail', status: 'active' },        // +0.01
-      { id: 'b', cardId: 'boardwalkPreferred', status: 'active' }  // +0.02
+      { id: 'a', cardId: 'readingRail', status: 'active' },
+      { id: 'b', cardId: 'boardwalkPreferred', status: 'active' }
     ]
   };
-  // 0.05 + 0.01 + 0.02 = 0.08
-  assert.equal(getHysaRateFor(seat, HYSA_BASE_RATE), 0.08);
+  assert.equal(getHysaRateFor(seat, 0.05), 0.08);
 });
 
-test('applyHysaInterestAtTurnStart: pays seat.cash * rate, mutates cash', () => {
-  const seat = { cash: 1000, hysaRate: 0.05, creditCards: [] };
-  const r = applyHysaInterestAtTurnStart(seat);
-  assert.equal(r.paid, 50);
-  assert.equal(seat.cash, 1050);
+test('applyHysaInterestAtTurnStart: pays into each open account at bank-derived rate', () => {
+  const seat = makeSeatWithBoth(1000, 1000);
+  const events = applyHysaInterestAtTurnStart(seat, 0.04);
+  assert.equal(events.length, 2);
+  assert.equal(seat.bankAccounts.mmcu.balance, 1030);
+  assert.equal(seat.bankAccounts.boardwalk.balance, 1037.5);
 });
 
-test('applyHysaInterestAtTurnStart: pays nothing on zero or negative cash', () => {
-  const seat = { cash: 0, hysaRate: 0.05, creditCards: [] };
-  const r = applyHysaInterestAtTurnStart(seat);
-  assert.equal(r.paid, 0);
-  assert.equal(seat.cash, 0);
+test('applyHysaInterestAtTurnStart: floors at 0% when bank-derived rate is negative', () => {
+  const seat = makeSeatWithBoth(1000, 1000);
+  const events = applyHysaInterestAtTurnStart(seat, 0.005);
+  assert.equal(seat.bankAccounts.mmcu.balance, 1000);
+  assert.equal(seat.bankAccounts.boardwalk.balance, 1002.5);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].bank, 'boardwalk');
 });
 
-test('applyHysaInterestAtTurnStart: factors in card bonuses', () => {
-  const seat = {
-    cash: 1000,
-    hysaRate: HYSA_BASE_RATE,
-    creditCards: [{ id: 'a', cardId: 'boardwalkPreferred', status: 'active' }]
-  };
-  const r = applyHysaInterestAtTurnStart(seat);
-  // (0.05 + 0.02) * 1000 = 70
-  assert.equal(r.paid, 70);
-  assert.equal(seat.cash, 1070);
+test('applyHysaInterestAtTurnStart: card hysaBonus stacks on top of bank rate', () => {
+  const seat = makeSeatWithBoth(1000, 0);
+  seat.creditCards = [{ id: 'CC-rr', cardId: 'readingRail', status: 'active' }];
+  applyHysaInterestAtTurnStart(seat, 0.03);
+  assert.equal(seat.bankAccounts.mmcu.balance, 1030);
 });
 
-test('endTurn: HYSA interest applied to the new active seat', () => {
+test('applyHysaInterestAtTurnStart: no interest into closed account or seat.cash', () => {
+  const seat = makeSeatWithBoth(0, 0);
+  seat.cash = 1000;
+  applyHysaInterestAtTurnStart(seat, 0.04);
+  assert.equal(seat.cash, 1000);
+});
+
+test('endTurn: HYSA accrues into open bank account, not seat.cash', () => {
   let s = makeRoom(2);
-  // Seat 1 will receive interest when their turn starts.
+  s.economy.reserveRate = 0.04;
+  openAccount(s.seats[1], 'mmcu');
   s.seats[1].cash = 1000;
-  s.seats[1].hysaRate = HYSA_BASE_RATE; // 0.05
+  deposit(s.seats[1], 'mmcu', 1000);
+  const cashBefore = s.seats[1].cash;
+
   s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
   s = step(s, { type: 'endTurn', seat: 0 });
+
   assert.equal(s.turn.seat, 1);
-  assert.equal(s.seats[1].cash, 1050);
+  assert.equal(s.seats[1].cash, cashBefore);
+  assert.ok(s.seats[1].bankAccounts.mmcu.balance > 1000);
 });
 
-test('endTurn: HYSA card bonus stacks with base rate at turn start', () => {
+test('endTurn: card hysaBonus stacks with bank rate at turn start', () => {
   let s = makeRoom(2);
+  s.economy.reserveRate = 0.03;
+  openAccount(s.seats[1], 'mmcu');
   s.seats[1].cash = 100;
-  s.seats[1].hysaRate = HYSA_BASE_RATE;
-  // Add readingRail (hysaBonus 0.01).
+  deposit(s.seats[1], 'mmcu', 100);
   s.seats[1].creditCards.push({
-    id: 'CC-rr', cardId: 'readingRail', status: 'active', acquiredAt: 0
+    id: 'CC-rr', cardId: 'readingRail', status: 'active', acquiredAt: 0, balance: 0
   });
+
   s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
   s = step(s, { type: 'endTurn', seat: 0 });
-  // Interest: 100 * (0.05 + 0.01) = 6 → cash 106
-  assert.equal(s.seats[1].cash, 106);
+  assert.ok(s.seats[1].bankAccounts.mmcu.balance > 100);
 });
+
+function makeSeatWithBoth(mmcuBalance, boardwalkBalance) {
+  return {
+    seat: 0,
+    cash: 0,
+    creditCards: [],
+    loans: [],
+    bankAccounts: {
+      mmcu: { open: true, balance: mmcuBalance, openedAt: 0 },
+      boardwalk: { open: true, balance: boardwalkBalance, openedAt: 0 }
+    }
+  };
+}

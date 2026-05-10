@@ -1,16 +1,22 @@
-import { AUCTION_INCREMENT, AUCTION_MIN_BID, AUCTION_DURATION_MS } from '../shared/constants.js';
+import { AUCTION_INCREMENT, AUCTION_DURATION_MS } from '../shared/constants.js';
+import { BOARD } from '../shared/board.js';
 
-// Auction model: timed free-for-all. The current pendingAction shape is
-//   { type: 'auction', spaceIndex, currentBid, highBidder, endsAtMs, lastBidAtMs }
-// Any non-bankrupt seat may bid at any time during the window. Each accepted
-// bid resets the timer to AUCTION_DURATION_MS from now. The auction settles
-// when the timer hits 0 or when ≤ 1 seat can afford the next minimum bid.
-// No bids → property remains unowned.
+export const AUCTION_ATTEMPT_FRACTIONS = [0.5, 0.25, 0];
 
-export function createAuction(spaceIndex, now = Date.now()) {
+export function startPriceForAttempt(spaceIndex, attempt) {
+  const space = BOARD[spaceIndex];
+  const price = space?.price ?? 0;
+  const fraction = AUCTION_ATTEMPT_FRACTIONS[Math.max(0, Math.min(AUCTION_ATTEMPT_FRACTIONS.length - 1, attempt))];
+  return Math.round(price * fraction * 100) / 100;
+}
+
+export function createAuction(spaceIndex, attempt = 0, now = Date.now()) {
+  const startPrice = startPriceForAttempt(spaceIndex, attempt);
   return {
     type: 'auction',
     spaceIndex,
+    attempt,
+    startPrice,
     currentBid: 0,
     highBidder: null,
     endsAtMs: now + AUCTION_DURATION_MS,
@@ -19,12 +25,10 @@ export function createAuction(spaceIndex, now = Date.now()) {
 }
 
 export function nextMinBid(auction) {
-  return Math.max(AUCTION_MIN_BID, auction.currentBid + AUCTION_INCREMENT);
+  if (auction.currentBid <= 0) return Math.max(0, auction.startPrice);
+  return auction.currentBid + AUCTION_INCREMENT;
 }
 
-// Count non-bankrupt seats that could still raise the current bid. Used to
-// detect the early-end condition: when no second bidder can outbid the high
-// bidder, the high bidder wins immediately.
 export function affordableBidderCount(state, auction) {
   const next = nextMinBid(auction);
   let n = 0;
@@ -49,6 +53,7 @@ export function applyBid(state, auction, seatIndex, amount, now = Date.now()) {
 }
 
 export function shouldSettleEarly(state, auction) {
+  if (auction.currentBid === 0) return false;
   return affordableBidderCount(state, auction) <= 1;
 }
 
@@ -56,16 +61,29 @@ export function isExpired(auction, now = Date.now()) {
   return now >= auction.endsAtMs;
 }
 
-// Settle: deduct cash, assign ownership if there was a winner. No-op on no bids.
 export function settle(state, auction) {
   if (auction.highBidder != null && auction.currentBid > 0) {
     const seat = state.seats[auction.highBidder];
     if (seat.cash < auction.currentBid) {
-      return { soldTo: null, price: 0 };
+      return { soldTo: null, price: 0, settled: true };
     }
     seat.cash -= auction.currentBid;
     state.properties[auction.spaceIndex].ownerSeat = auction.highBidder;
-    return { soldTo: auction.highBidder, price: auction.currentBid };
+    return { soldTo: auction.highBidder, price: auction.currentBid, settled: true };
   }
-  return { soldTo: null, price: 0 };
+  return { soldTo: null, price: 0, settled: false };
+}
+
+export function pickRandomNonBankruptSeat(state, rng) {
+  const eligible = state.seats.filter((s) => !s.bankrupt);
+  if (eligible.length === 0) return null;
+  const idx = Math.floor((rng?.() ?? 0) * eligible.length);
+  return eligible[Math.min(idx, eligible.length - 1)].seat;
+}
+
+export function randomAssign(state, spaceIndex, rng) {
+  const winnerSeat = pickRandomNonBankruptSeat(state, rng);
+  if (winnerSeat == null) return { soldTo: null, price: 0 };
+  state.properties[spaceIndex].ownerSeat = winnerSeat;
+  return { soldTo: winnerSeat, price: 0, randomized: true };
 }

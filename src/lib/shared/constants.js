@@ -5,7 +5,7 @@ export const JAIL_INDEX = 10;
 export const FREE_PARKING_INDEX = 20;
 export const GO_TO_JAIL_INDEX = 30;
 
-export const GO_SALARY = 200;
+export const GO_SALARY = 100;
 export const JAIL_FINE = 50;
 export const JAIL_MAX_TURNS = 3;
 export const MAX_DOUBLES = 3;
@@ -15,24 +15,16 @@ export const STARTING_CASH = 1500;
 export const TOTAL_HOUSES = 32;
 export const TOTAL_HOTELS = 12;
 
-export const AUCTION_MIN_BID = 1;
 export const AUCTION_INCREMENT = 1;
 export const AUCTION_DURATION_MS = 10_000;
 
 export const STARTING_CREDIT_SCORE = 720;
-export const HYSA_BASE_RATE = 0.05;
 export const TRANSACTION_LOG_CAP = 200;
 
-export const MORTGAGE_INTEREST = 0.1;
-
-// "Buy with Mortgage" — financing a property purchase over N installments at a
-// fixed per-turn interest rate. Distinct from MORTGAGE_INTEREST, which is the
-// premium for unmortgaging an already-owned property via the classic flow.
 export const BUY_MORTGAGE_PTR = 0.10;
 export const BUY_MORTGAGE_TERMS = [5, 10];
 
 export const RAILROAD_RENT = [25, 50, 100, 200];
-export const UTILITY_MULT = [4, 10];
 
 export const INCOME_TAX = 200;
 export const LUXURY_TAX = 75;

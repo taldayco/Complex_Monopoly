@@ -135,7 +135,10 @@ function handleGameAction(socket, msg) {
   // Always derive seat index from the authenticated socket, not the client message.
   // Strip any client-supplied `_server` flag so internal-only actions (e.g.
   // 'auctionTick') can never be invoked by a remote.
-  const action = { ...msg, seat: ss.seatIndex };
+  const liveSeat = room.seats.find((s) => s.playerToken === ss.playerToken);
+  if (!liveSeat) return sendError(socket, 'NOT_IN_ROOM');
+  if (ss.seatIndex !== liveSeat.seat) ss.seatIndex = liveSeat.seat;
+  const action = { ...msg, seat: liveSeat.seat };
   delete action._server;
   const rng = makeRng(room.rngSeed, room.rngCursor);
   const result = reducer(room, action, { rng });
@@ -207,7 +210,9 @@ function broadcastState(roomCode) {
   // close event.
   for (const s of [...sockets]) {
     const ss = socketState.get(s);
-    const viewerSeat = ss?.seatIndex ?? null;
+    const liveSeat = ss && room.seats.find((seat) => seat.playerToken === ss.playerToken);
+    const viewerSeat = liveSeat?.seat ?? ss?.seatIndex ?? null;
+    if (ss && liveSeat && ss.seatIndex !== liveSeat.seat) ss.seatIndex = liveSeat.seat;
     try {
       s.send(JSON.stringify({ type: S2C.STATE, gameState: scrubState(room, viewerSeat) }));
     } catch (e) {
@@ -256,11 +261,12 @@ function sendError(socket, code, message) {
 // only included on the matching seat and redacted from everyone else's view.
 function scrubState(room, viewerSeat) {
   const hostSeat = room.seats.find((s) => s.playerToken === room.hostPlayerToken)?.seat ?? null;
-  const { hostPlayerToken, rngSeed, rngCursor, reserveDecks, stocks, marketOpen, ...rest } = room;
+  const { hostPlayerToken, rngSeed, rngCursor, reserveDecks, stocks, marketOpen, economy, ...rest } = room;
   return {
     ...rest,
     hostSeat,
     stocks: scrubStocks(stocks),
+    economy: scrubEconomy(economy),
     marketOpen: scrubMarketOpen(marketOpen),
     reserveDecks: reserveDecks
       ? {
@@ -293,15 +299,18 @@ function scrubState(room, viewerSeat) {
         baseScore: s.baseScore,
         creditScore: s.creditScore,
         loans: s.loans,
+        mortgageLoans: s.mortgageLoans ?? [],
+        standardLoansThisTurn: s.standardLoansThisTurn ?? 0,
         creditCards: s.creditCards,
         stockLots: s.stockLots,
         stockCostBasis: s.stockCostBasis,
         transactions: s.transactions,
         eventInventory: s.eventInventory,
         tempEffects: s.tempEffects,
-        hysaRate: s.hysaRate,
         loanTurnResponded: s.loanTurnResponded,
+        mortgageTurnResponded: s.mortgageTurnResponded ?? true,
         pendingLoanOffer: s.pendingLoanOffer ?? null,
+        bankAccounts: s.bankAccounts ?? null,
         lastDrawnEventCard: scrubLastDrawnEventCard(s.lastDrawnEventCard, isSelf),
         drewEventCardThisTurn: s.drewEventCardThisTurn ?? false,
         // Private to the owning seat: revealed wildcard values from insider tips.
@@ -366,9 +375,25 @@ function scrubStocks(stocks) {
   }
   return {
     round: stocks.round ?? 0,
-    cycle: stocks.cycle ?? 0,
     lastFlip: stocks.lastFlip ?? null,
     market
+  };
+}
+
+function scrubEconomy(econ) {
+  if (!econ || typeof econ !== 'object') return econ ?? null;
+  const deck = Array.isArray(econ.deck) ? econ.deck : [];
+  let wildsRemaining = 0;
+  for (const c of deck) if (c && c.wild) wildsRemaining += 1;
+  return {
+    reserveRate: econ.reserveRate ?? 0,
+    inflationFactor: econ.inflationFactor ?? 1,
+    deckSize: deck.length,
+    wildsRemaining,
+    wildPool: Array.isArray(econ.wildPool) ? econ.wildPool : [],
+    history: Array.isArray(econ.history) ? econ.history : [],
+    lastFlip: econ.lastFlip ?? null,
+    round: econ.round ?? 0
   };
 }
 
