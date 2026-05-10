@@ -23,35 +23,41 @@ export function setTimerImpl(t) {
 export const setAuctionTimer = setTimerImpl;
 
 export function scheduleTimer(kind, roomCode, fireAtMs) {
-  if (!impl) return;
+  if (!impl) return Promise.resolve();
   try {
     const result = impl.schedule(kind, roomCode, fireAtMs);
-    if (result && typeof result.catch === 'function') {
-      result.catch((e) => console.error('scheduleTimer failed', kind, e?.message ?? e));
+    if (result && typeof result.then === 'function') {
+      return result.catch((e) => {
+        console.error('scheduleTimer failed', kind, e?.message ?? e);
+      });
     }
   } catch (e) {
     console.error('scheduleTimer failed', kind, e?.message ?? e);
   }
+  return Promise.resolve();
 }
 
 export function cancelTimer(kind) {
-  if (!impl) return;
+  if (!impl) return Promise.resolve();
   try {
     const result = impl.cancel(kind);
-    if (result && typeof result.catch === 'function') {
-      result.catch((e) => console.error('cancelTimer failed', kind, e?.message ?? e));
+    if (result && typeof result.then === 'function') {
+      return result.catch((e) => {
+        console.error('cancelTimer failed', kind, e?.message ?? e);
+      });
     }
   } catch (e) {
     console.error('cancelTimer failed', kind, e?.message ?? e);
   }
+  return Promise.resolve();
 }
 
 // ---- Backward-compat wrappers for the auction-only call sites ----
 
 export function scheduleAuctionEnd(roomCode, endsAtMs) {
-  scheduleTimer('auction', roomCode, endsAtMs);
+  return scheduleTimer('auction', roomCode, endsAtMs);
 }
 
 export function cancelAuctionEnd() {
-  cancelTimer('auction');
+  return cancelTimer('auction');
 }

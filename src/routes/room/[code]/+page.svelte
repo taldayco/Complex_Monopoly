@@ -6,6 +6,7 @@
   import { conn, session, game } from '$lib/client/stores.svelte.js';
   import { loadSession } from '$lib/client/localSession.js';
   import Lobby from '$lib/client/components/Lobby.svelte';
+  import RollOff from '$lib/client/components/RollOff.svelte';
   import GameUI from '$lib/client/components/GameUI.svelte';
   import Finished from '$lib/client/components/Finished.svelte';
 
@@ -15,33 +16,33 @@
   let noSession = $state(false);
 
   onMount(() => {
-    // Check both sessionStorage (this tab) and localStorage (any prior tab)
-    // for a saved identity in this room. If the session.roomCode in memory
-    // is already set for this room (e.g. just came from createRoom/joinRoom
-    // on the landing page), use that — saveSession may not have run yet.
     let s = loadSession(roomCode);
     if (!s && session.roomCode === roomCode && session.playerToken) {
       s = { roomCode, playerToken: session.playerToken, seat: session.seat };
     }
     if (!s) {
-      // No identity for this room. The server has no way to recognize this
-      // client — sitting on the page would just spin "Connecting…" forever.
-      // Send them home so they can join.
       noSession = true;
       return;
     }
     session.roomCode = s.roomCode;
     session.playerToken = s.playerToken;
     session.seat = s.seat;
+    // socket.connect()'s open handler reads session and sends auth, so we
+    // don't queue a duplicate here. If the WS is already open (e.g. the
+    // landing page just established it), it'll fire immediately because
+    // connect() will detect that and we'll explicitly send.
     connect();
-    send({ type: 'auth', roomCode: s.roomCode, playerToken: s.playerToken });
+    if (typeof window !== 'undefined') {
+      // Page-load case where the WS was opened before this mount: the open
+      // handler already fired, so we need to explicitly send auth now.
+      send({ type: 'auth', roomCode: s.roomCode, playerToken: s.playerToken });
+    }
   });
 
-  // Expose for browser-console debugging: open DevTools, type
-  //   __monopoly.game.state
-  // to see the live state without poking at module internals.
+  // Expose for browser-console debugging without clobbering an already-set
+  // `debug = true` flag from socket.js's frame logger.
   if (typeof window !== 'undefined') {
-    window.__monopoly = { game, session, conn };
+    window.__monopoly = { ...(window.__monopoly ?? {}), game, session, conn };
   }
 </script>
 
@@ -64,10 +65,14 @@
   </div>
 {:else if game.state.phase === 'lobby'}
   <Lobby state={game.state} />
+{:else if game.state.phase === 'rollOff'}
+  <RollOff state={game.state} />
 {:else if game.state.phase === 'playing'}
   <GameUI state={game.state} />
 {:else if game.state.phase === 'finished'}
   <Finished state={game.state} />
+{:else}
+  <div class="loading">Unknown phase: {game.state.phase}</div>
 {/if}
 
 <style>

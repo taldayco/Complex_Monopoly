@@ -75,12 +75,23 @@ export class GameDO {
     if (due.length > 0) {
       await this.state.storage.put(PENDING_TIMERS_KEY, map);
     }
+    // Await each runServerAction so any timer it schedules is fully written
+    // before we re-arm the alarm. If runServerAction's writes were left
+    // in-flight, the rearm below could overwrite the new alarm with
+    // deleteAlarm, silently dropping cascade-auction or market-open ticks.
     for (const { kind, roomCode } of due) {
       const actionType = KIND_TO_ACTION[kind];
       if (!actionType) continue;
-      runServerAction(roomCode, { type: actionType, _server: true });
+      try {
+        await runServerAction(roomCode, { type: actionType, _server: true });
+      } catch (e) {
+        console.error('alarm runServerAction failed', kind, e?.message ?? e);
+      }
     }
-    await rearmAlarm(this.state.storage, map);
+    // Re-read storage to pick up any new timers schedulers wrote during
+    // runServerAction. Using the local `map` would miss them.
+    const fresh = (await this.state.storage.get(PENDING_TIMERS_KEY)) ?? {};
+    await rearmAlarm(this.state.storage, fresh);
   }
 
   attachSocket(ws) {
@@ -90,14 +101,19 @@ export class GameDO {
       const data = typeof event.data === 'string'
         ? event.data
         : new TextDecoder().decode(event.data);
-      try {
-        handleMessage(ws, data);
-      } catch (e) {
-        console.error('handleMessage error', e);
+      // handleMessage is async (awaits timer scheduling); use waitUntil so the
+      // DO keeps the work alive past the synchronous event handler return.
+      const p = (async () => {
         try {
-          ws.send(JSON.stringify({ type: 'error', code: 'INTERNAL', message: e?.message ?? String(e) }));
-        } catch {}
-      }
+          await handleMessage(ws, data);
+        } catch (e) {
+          console.error('handleMessage error', e);
+          try {
+            ws.send(JSON.stringify({ type: 'error', code: 'INTERNAL', message: e?.message ?? String(e) }));
+          } catch {}
+        }
+      })();
+      this.state.waitUntil?.(p);
     });
 
     ws.addEventListener('close', () => {

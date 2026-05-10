@@ -1,15 +1,17 @@
 import { conn, session, game, setError } from './stores.svelte.js';
-import { saveSession } from './localSession.js';
+import { saveSession, clearSession } from './localSession.js';
 import { S2C } from '../shared/messageTypes.js';
 
 let ws = null;
 let outbox = [];
 let reconnectTimer = null;
+let reconnectAttempt = 0;
+let heartbeatTimer = null;
+let lastPongAt = 0;
 
-// Frame-level WebSocket logging. Off by default to keep the console clean.
-// In DevTools console, enable with:
-//   __monopoly.debug = true
-// Then every incoming/outgoing frame and reactivity transition is logged.
+const PING_INTERVAL_MS = 25_000;
+const PONG_TIMEOUT_MS = 50_000;
+
 function dbg(...args) {
   if (typeof window !== 'undefined' && window.__monopoly?.debug) {
     console.log('[ws]', ...args);
@@ -28,11 +30,18 @@ export function connect() {
 
   ws.addEventListener('open', () => {
     conn.status = 'open';
+    reconnectAttempt = 0;
+    lastPongAt = Date.now();
+    // If the page already queued an auth (typical for room/[code] mount),
+    // flushing will dispatch it. If not (reconnect after a drop), fall back
+    // to auto-auth from the saved session. The dedup guard avoids sending
+    // auth twice when the page also pushed one.
+    const hasQueuedAuth = outbox.some((m) => m?.type === 'auth');
     flushOutbox();
-    // If we already have a session, auto-auth.
-    if (session.roomCode && session.playerToken) {
+    if (!hasQueuedAuth && session.roomCode && session.playerToken) {
       send({ type: 'auth', roomCode: session.roomCode, playerToken: session.playerToken });
     }
+    startHeartbeat();
   });
 
   ws.addEventListener('message', (e) => {
@@ -44,23 +53,52 @@ export function connect() {
   ws.addEventListener('close', () => {
     conn.status = 'closed';
     ws = null;
+    stopHeartbeat();
     scheduleReconnect();
   });
 
   ws.addEventListener('error', () => {
-    // Most close events follow this; reconnect is handled in close.
+    // Close handler runs the reconnect.
   });
 }
 
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => connect(), 1500);
+  reconnectAttempt += 1;
+  // Exponential backoff with jitter, capped at 30s.
+  const base = Math.min(30_000, 500 * Math.pow(2, Math.min(reconnectAttempt, 6)));
+  const delay = base + Math.floor(Math.random() * 500);
+  reconnectTimer = setTimeout(() => connect(), delay);
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - lastPongAt > PONG_TIMEOUT_MS) {
+      dbg('heartbeat timeout — forcing reconnect');
+      try { ws.close(); } catch {}
+      return;
+    }
+    try { ws.send(JSON.stringify({ type: 'ping', t: Date.now() })); } catch {}
+  }, PING_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer != null) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
 }
 
 export function send(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     dbg('▶', msg.type, msg);
-    ws.send(JSON.stringify(msg));
+    try { ws.send(JSON.stringify(msg)); }
+    catch (e) {
+      dbg('send threw, requeueing', e?.message ?? e);
+      outbox.push(msg);
+    }
   } else {
     dbg('⏸ outbox', msg.type, msg);
     outbox.push(msg);
@@ -71,7 +109,13 @@ export function send(msg) {
 function flushOutbox() {
   const batch = outbox;
   outbox = [];
-  for (const m of batch) ws.send(JSON.stringify(m));
+  for (const m of batch) {
+    try { ws.send(JSON.stringify(m)); }
+    catch (e) {
+      dbg('flush failed, requeueing', e?.message ?? e);
+      outbox.push(m);
+    }
+  }
 }
 
 function handleServerMessage(msg) {
@@ -91,9 +135,31 @@ function handleServerMessage(msg) {
     case S2C.STATE:
       game.state = msg.gameState;
       break;
-    case S2C.ERROR:
-      setError(humanizeError(msg.code, msg.message));
+    case S2C.PING:
+      lastPongAt = Date.now();
       break;
+    case S2C.ERROR:
+      handleErrorMessage(msg);
+      break;
+  }
+}
+
+function handleErrorMessage(msg) {
+  setError(humanizeError(msg.code, msg.message));
+  // Stale session — server has no record of this room or this seat. Clearing
+  // the local session prevents the reconnect loop from re-auth'ing forever
+  // and bounces the user home so they can join a real room.
+  if ((msg.code === 'NO_ROOM' || msg.code === 'NOT_IN_ROOM') &&
+      typeof window !== 'undefined' && session.roomCode) {
+    const stale = session.roomCode;
+    clearSession(stale);
+    session.roomCode = null;
+    session.playerToken = null;
+    session.seat = null;
+    game.state = null;
+    if (window.location.pathname.startsWith(`/room/${stale}`)) {
+      window.location.replace('/');
+    }
   }
 }
 

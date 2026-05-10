@@ -80,10 +80,14 @@
     pending?.type === 'buyDecision' && pending.seat === me?.seat
   );
   const canRoll = $derived(
-    isMyTurn && turnPhase === 'preRoll' && !me?.inJail && !pending && me?.loanTurnResponded !== false
+    isMyTurn && turnPhase === 'preRoll' && !me?.inJail && !pending &&
+    me?.loanTurnResponded !== false && me?.mortgageTurnResponded !== false
   );
   const loanBlocked = $derived(
     isMyTurn && turnPhase === 'preRoll' && me?.loanTurnResponded === false
+  );
+  const mortgageBlocked = $derived(
+    isMyTurn && turnPhase === 'preRoll' && me?.mortgageTurnResponded === false
   );
   const canEnd = $derived(
     isMyTurn && turnPhase === 'endable' && !pending
@@ -108,6 +112,8 @@
       You are in jail.
     {:else if loanBlocked}
       Loan installment due — open Loans to pay or skip.
+    {:else if mortgageBlocked}
+      Mortgage installment due — open Loans to pay or skip.
     {:else if turnPhase === 'preRoll'}
       Your turn — roll the dice.
     {:else if turnPhase === 'endable'}
@@ -197,31 +203,25 @@
 
   {#if myMonopolies.length > 0}
     <details class="builds">
-      <summary>Build / Mortgage</summary>
+      <summary>Build houses</summary>
       <div class="manage-grid">
         {#each Object.entries(gs.properties) as [iStr, p] (iStr)}
-          {#if p.ownerSeat === me?.seat}
+          {#if p.ownerSeat === me?.seat && BOARD[Number(iStr)]?.type === 'property'}
             {@const i = Number(iStr)}
             {@const sp = BOARD[i]}
             <div class="prop-row">
               <span class="dot" style:background={sp.colorGroup ? `var(--${sp.colorGroup})` : 'var(--rail)'}></span>
               <span class="prop-name">{sp.name}</span>
-              {#if sp.type === 'property'}
-                <span class="houses-label">
-                  {p.houses === 5 ? 'Hotel' : `${p.houses} houses`}
-                </span>
-                <button onclick={() => send({ type: 'buyHouse', spaceIndex: i })}>+</button>
-                <button onclick={() => send({ type: 'sellHouse', spaceIndex: i })}>−</button>
-              {/if}
-              {#if !p.mortgaged}
-                <button onclick={() => send({ type: 'mortgage', spaceIndex: i })}>Mortgage</button>
-              {:else}
-                <button onclick={() => send({ type: 'unmortgage', spaceIndex: i })}>Unmortgage</button>
-              {/if}
+              <span class="houses-label">
+                {p.houses === 5 ? 'Hotel' : `${p.houses} houses`}
+              </span>
+              <button onclick={() => send({ type: 'buyHouse', spaceIndex: i })}>+</button>
+              <button onclick={() => send({ type: 'sellHouse', spaceIndex: i })}>−</button>
             </div>
           {/if}
         {/each}
       </div>
+      <p class="builds-hint">Mortgages and Sell-to-Bank live in the Properties panel.</p>
     </details>
   {/if}
 </div>
@@ -333,4 +333,5 @@
   .prop-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .houses-label { color: var(--ink-mute); font-size: 0.7rem; }
   .prop-row button { padding: 0.15rem 0.35rem; font-size: 0.7rem; }
+  .builds-hint { font-size: 0.72rem; color: var(--ink-mute); font-style: italic; margin: 0.4rem 0 0; }
 </style>

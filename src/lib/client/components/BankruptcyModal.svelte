@@ -38,8 +38,8 @@
             </button>
           {/if}
           {#if !p.mortgaged && p.houses === 0}
-            <button onclick={() => send({ type: 'mortgage', spaceIndex: i })}>
-              Mortgage (${sp.mortgageValue})
+            <button onclick={() => send({ type: 'sellPropertyToBank', spaceIndex: i })}>
+              Sell to Bank (${sp.mortgageValue})
             </button>
           {/if}
         </div>

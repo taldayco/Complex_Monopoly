@@ -6,6 +6,7 @@ import {
   getTierByScore,
   sumOpenBankBalances,
   sumActiveLoanBalances,
+  calcMaxStandardLoan,
   MISSED_PAYMENT_CREDIT_PENALTY
 } from './loanCatalog.js';
 
@@ -212,6 +213,18 @@ export function calcCreditLine(seat, cardId) {
 
 export function getCardLineBonusFor(seat) {
   return sumActiveCardLineBonus(seat);
+}
+
+export function getMaxLineFor(seat) {
+  const cardLineBonus = sumActiveCardLineBonus(seat);
+  let lineMultiplier = 1;
+  if (Array.isArray(seat?.tempEffects)) {
+    for (const e of seat.tempEffects) {
+      if (e?.effectId === 'doubleMaxLine') lineMultiplier *= 2;
+      if (e?.effectId === 'maxLoanHalved') lineMultiplier *= 0.5;
+    }
+  }
+  return calcMaxStandardLoan(seat, { cardLineBonus, lineMultiplier });
 }
 
 export function getMissedPaymentPenalty(seat) {

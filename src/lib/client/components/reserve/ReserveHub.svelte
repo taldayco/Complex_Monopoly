@@ -1,6 +1,5 @@
 <script>
   import { ui } from '$lib/client/stores.svelte.js';
-  import { HYSA_BASE_RATE } from '$lib/shared/constants.js';
   import { getHysaRateFor } from '$lib/shared/reserve/cardCatalog.js';
   import MarketPanel from './MarketPanel.svelte';
   import LoansPanel from './LoansPanel.svelte';
@@ -11,7 +10,7 @@
   let { state: gs, mySeat } = $props();
 
   const me = $derived(gs.seats.find((s) => s.seat === mySeat));
-  const hysaRate = $derived(me ? getHysaRateFor(me, HYSA_BASE_RATE) : 0);
+  const hysaRate = $derived(me ? getHysaRateFor(me, gs.economy?.reserveRate ?? 0) : 0);
 
   const TABS = [
     { id: 'market', label: 'Market' },

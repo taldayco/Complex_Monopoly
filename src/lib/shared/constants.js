@@ -26,6 +26,8 @@ export const BUY_MORTGAGE_TERMS = [5, 10];
 
 export const RAILROAD_RENT = [25, 50, 100, 200];
 
+export const UTILITY_MULT = [10, 15];
+
 export const INCOME_TAX = 200;
 export const LUXURY_TAX = 75;
 

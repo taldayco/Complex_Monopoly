@@ -33,8 +33,15 @@ export function handleMessage(socket, raw) {
     case C2S.JOIN_ROOM:     return handleJoinRoom(socket, msg);
     case C2S.LEAVE_ROOM:    return handleLeaveRoom(socket, msg);
     case C2S.START_GAME:    return handleStartGame(socket, msg);
+    case 'ping':            return handlePing(socket, msg);
     default:                return handleGameAction(socket, msg);
   }
+}
+
+function handlePing(socket, msg) {
+  try {
+    socket.send(JSON.stringify({ type: S2C.PING, t: msg?.t ?? Date.now() }));
+  } catch {}
 }
 
 export function handleConnect(socket) {
@@ -49,10 +56,25 @@ export function handleDisconnect(socket) {
     socketState.delete(socket);
     return;
   }
-  setSeatConnection(ss.roomCode, ss.playerToken, false);
   removeSocketFromRoom(ss.roomCode, socket);
   socketState.delete(socket);
+  // Only mark the seat disconnected if no other live socket holds the same
+  // playerToken. A player with two open tabs should not trip "skip player"
+  // eligibility just because one tab closed.
+  if (!hasLiveSocketFor(ss.roomCode, ss.playerToken)) {
+    setSeatConnection(ss.roomCode, ss.playerToken, false);
+  }
   broadcastState(ss.roomCode);
+}
+
+function hasLiveSocketFor(roomCode, playerToken) {
+  const set = roomSockets.get(roomCode);
+  if (!set) return false;
+  for (const s of set) {
+    const meta = socketState.get(s);
+    if (meta?.playerToken === playerToken) return true;
+  }
+  return false;
 }
 
 // ---- LOBBY HANDLERS ----
@@ -130,15 +152,12 @@ function handleAuth(socket, msg) {
 
 // ---- IN-GAME ACTION ----
 
-function handleGameAction(socket, msg) {
+async function handleGameAction(socket, msg) {
   const ss = socketState.get(socket);
   if (!ss) return sendError(socket, 'NOT_AUTHED');
   const room = getRoom(ss.roomCode);
   if (!room) return sendError(socket, 'NO_ROOM');
 
-  // Always derive seat index from the authenticated socket, not the client message.
-  // Strip any client-supplied `_server` flag so internal-only actions (e.g.
-  // 'auctionTick') can never be invoked by a remote.
   const liveSeat = room.seats.find((s) => s.playerToken === ss.playerToken);
   if (!liveSeat) return sendError(socket, 'NOT_IN_ROOM');
   if (ss.seatIndex !== liveSeat.seat) ss.seatIndex = liveSeat.seat;
@@ -148,14 +167,15 @@ function handleGameAction(socket, msg) {
   const result = reducer(room, action, { rng });
   if (!result.ok) return sendError(socket, result.error);
   commitRoomState(ss.roomCode, result.state);
-  processEventsForTimers(ss.roomCode, result.events);
+  await processEventsForTimers(ss.roomCode, result.events);
   broadcastState(ss.roomCode);
 }
 
 // Runs an action that originates inside the server (e.g. an auction-timer fire
-// injecting `{ type: 'auctionTick', _server: true }`). Bypasses the socket
-// auth/seat derivation and reuses the standard reducer + commit + broadcast.
-export function runServerAction(roomCode, action) {
+// injecting `{ type: 'auctionTick', _server: true }`). Returns a promise that
+// resolves once timer scheduling side-effects have settled — important for
+// the DO alarm() handler so a re-armed alarm isn't immediately overwritten.
+export async function runServerAction(roomCode, action) {
   const room = getRoom(roomCode);
   if (!room) return;
   const rng = makeRng(room.rngSeed, room.rngCursor);
@@ -165,11 +185,11 @@ export function runServerAction(roomCode, action) {
     return;
   }
   commitRoomState(roomCode, result.state);
-  processEventsForTimers(roomCode, result.events);
+  await processEventsForTimers(roomCode, result.events);
   broadcastState(roomCode);
 }
 
-function processEventsForTimers(roomCode, events) {
+async function processEventsForTimers(roomCode, events) {
   if (!events || events.length === 0) return;
   let auctionFinal;
   let marketFinal;
@@ -188,10 +208,12 @@ function processEventsForTimers(roomCode, events) {
       marketFinal = null;
     }
   }
-  if (auctionFinal === null) cancelAuctionEnd();
-  else if (typeof auctionFinal === 'number') scheduleAuctionEnd(roomCode, auctionFinal);
-  if (marketFinal === null) cancelTimer('market');
-  else if (typeof marketFinal === 'number') scheduleTimer('market', roomCode, marketFinal);
+  const writes = [];
+  if (auctionFinal === null) writes.push(cancelAuctionEnd());
+  else if (typeof auctionFinal === 'number') writes.push(scheduleAuctionEnd(roomCode, auctionFinal));
+  if (marketFinal === null) writes.push(cancelTimer('market'));
+  else if (typeof marketFinal === 'number') writes.push(scheduleTimer('market', roomCode, marketFinal));
+  await Promise.all(writes);
 }
 
 // ---- BROADCAST ----
@@ -308,6 +330,8 @@ function scrubState(room, viewerSeat) {
         tempEffects: s.tempEffects,
         loanTurnResponded: s.loanTurnResponded,
         mortgageTurnResponded: s.mortgageTurnResponded ?? true,
+        nextDevModifier: s.nextDevModifier ?? null,
+        nextPermitFeeModifier: s.nextPermitFeeModifier ?? null,
         pendingLoanOffer: s.pendingLoanOffer ?? null,
         bankAccounts: s.bankAccounts ?? null,
         lastDrawnEventCard: scrubLastDrawnEventCard(s.lastDrawnEventCard, isSelf),

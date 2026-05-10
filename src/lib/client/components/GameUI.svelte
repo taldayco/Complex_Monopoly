@@ -7,6 +7,9 @@
   import AuctionModal from './AuctionModal.svelte';
   import TradeModal from './TradeModal.svelte';
   import JailModal from './JailModal.svelte';
+  import JailSeizureModal from './JailSeizureModal.svelte';
+  import TrainTravelModal from './TrainTravelModal.svelte';
+  import CardChoiceModal from './CardChoiceModal.svelte';
   import BankruptcyModal from './BankruptcyModal.svelte';
   import CardModal from './CardModal.svelte';
   import PropertyCard from './PropertyCard.svelte';
@@ -62,6 +65,22 @@
   const auction = $derived(gs.pendingAction?.type === 'auction' ? gs.pendingAction : null);
   const settleDebt = $derived(gs.pendingAction?.type === 'settleDebt' && gs.pendingAction.debtorSeat === session.seat ? gs.pendingAction : null);
   const incomingTrade = $derived(gs.pendingTrade && gs.pendingTrade.toSeat === session.seat ? gs.pendingTrade : null);
+
+  const trainTravel = $derived(
+    gs.pendingTrainTravel && gs.pendingTrainTravel.seat === session.seat
+      ? gs.pendingTrainTravel
+      : null
+  );
+  const jailSeizure = $derived(
+    gs.pendingJailSeizureChoice && gs.pendingJailSeizureChoice.seat === session.seat
+      ? gs.pendingJailSeizureChoice
+      : null
+  );
+  const cardChoice = $derived(
+    gs.pendingCardChoice && gs.pendingCardChoice.seat === session.seat
+      ? gs.pendingCardChoice
+      : null
+  );
 
   const inJailMyTurn = $derived(isMyTurn && me?.inJail && gs.turn.phase === 'preRoll');
 
@@ -129,6 +148,18 @@
 
   {#if inJailMyTurn}
     <JailModal state={gs} {me} />
+  {/if}
+
+  {#if trainTravel}
+    <TrainTravelModal pending={trainTravel} />
+  {/if}
+
+  {#if jailSeizure}
+    <JailSeizureModal pending={jailSeizure} state={gs} />
+  {/if}
+
+  {#if cardChoice}
+    <CardChoiceModal pending={cardChoice} state={gs} {me} />
   {/if}
 
   {#if recentCard}

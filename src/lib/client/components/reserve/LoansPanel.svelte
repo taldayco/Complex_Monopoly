@@ -11,9 +11,12 @@
   const maxLine = $derived(me ? getMaxLineFor(me) : 0);
   const loans = $derived(Array.isArray(me?.loans) ? me.loans : []);
   const activeLoans = $derived(loans.filter((l) => l.status === 'active'));
+  const mortgageLoans = $derived(Array.isArray(me?.mortgageLoans) ? me.mortgageLoans : []);
+  const activeMortgages = $derived(mortgageLoans.filter((l) => l.status === 'active'));
   const pendingOffer = $derived(me?.pendingLoanOffer ?? null);
   const totalActiveBalance = $derived(
-    activeLoans.reduce((acc, l) => acc + (l.balance ?? 0), 0)
+    activeLoans.reduce((acc, l) => acc + (l.balance ?? 0), 0) +
+    activeMortgages.reduce((acc, l) => acc + (l.balance ?? 0), 0)
   );
 
   let amountInput = $state(100);
@@ -46,6 +49,15 @@
   }
   function payoff(loanId) {
     send({ type: 'payoffLoan', loanId });
+  }
+  function payMortgage(loanId) {
+    send({ type: 'payMortgageInstallment', loanId });
+  }
+  function skipMortgage(loanId) {
+    send({ type: 'skipMortgageInstallment', loanId });
+  }
+  function payoffMortgage(loanId) {
+    send({ type: 'payoffMortgageLoan', loanId });
   }
 
   const overMax = $derived(Number(amountInput) > maxLine);
@@ -114,7 +126,7 @@
             <div class="loan-head">
               <span class="balance">${fmt(loan.balance)}</span>
               {#if loan.source === 'mortgage'}
-                <span class="mortgage-tag" title="Property mortgage">
+                <span class="mortgage-tag" title="Buy-with-mortgage">
                   🏠 {loan.propertyName ?? `Space ${loan.propertyIndex}`}
                 </span>
               {/if}
@@ -140,6 +152,52 @@
               </button>
               <button
                 onclick={() => payoff(loan.id)}
+                disabled={(me?.cash ?? 0) < loan.balance}
+              >
+                Pay off ${fmt(loan.balance)}
+              </button>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+
+  <section class="active mortgages">
+    <h3>Mortgage loans</h3>
+    {#if activeMortgages.length === 0}
+      <p class="empty">No mortgage loans. Apply via the Properties panel.</p>
+    {:else}
+      <ul class="loan-list">
+        {#each activeMortgages as loan (loan.id)}
+          <li class="loan" class:due={loan.dueThisTurn}>
+            <div class="loan-head">
+              <span class="balance">${fmt(loan.balance)}</span>
+              <span class="mortgage-tag" title="Property mortgage">
+                🏠 Space {loan.propertyIndex}
+              </span>
+              <span class="meta">
+                {loan.paymentsMade}/{loan.term} paid · {fmtPct(loan.ptr)}/turn
+              </span>
+              {#if loan.dueThisTurn}<span class="due-badge">DUE</span>{/if}
+            </div>
+            <div class="loan-actions">
+              <button
+                class="primary"
+                onclick={() => payMortgage(loan.id)}
+                disabled={!loan.dueThisTurn || (me?.cash ?? 0) < Math.min(loan.installment, loan.balance)}
+              >
+                Pay ${fmt(Math.min(loan.installment, loan.balance))}
+              </button>
+              <button
+                onclick={() => skipMortgage(loan.id)}
+                disabled={!loan.dueThisTurn}
+                title="Defer this installment for a credit hit"
+              >
+                Skip (-credit)
+              </button>
+              <button
+                onclick={() => payoffMortgage(loan.id)}
                 disabled={(me?.cash ?? 0) < loan.balance}
               >
                 Pay off ${fmt(loan.balance)}

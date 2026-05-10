@@ -2,13 +2,59 @@
   import { send } from '$lib/client/socket.js';
   import { ui } from '$lib/client/stores.svelte.js';
   import { BOARD, isOwnable } from '$lib/shared/board.js';
-  import { COLOR_GROUPS, MORTGAGE_INTEREST } from '$lib/shared/constants.js';
+  import { COLOR_GROUPS } from '$lib/shared/constants.js';
+  import {
+    MORTGAGE_TIER_RATES,
+    MORTGAGE_TERMS,
+    MORTGAGE_MAX_DOWN_PAYMENT,
+    downPaymentDiscount
+  } from '$lib/engine/mortgage.js';
+  import { getTierByScore } from '$lib/shared/reserve/loanCatalog.js';
 
   let { state: gs, mySeat } = $props();
 
   const me = $derived(gs.seats.find((s) => s.seat === mySeat));
+  const myTier = $derived(getTierByScore(me?.creditScore ?? 0));
+  const mortgageEligible = $derived(
+    !!MORTGAGE_TIER_RATES[myTier.name]
+  );
 
-  // Each owned property as a fully-resolved row.
+  let openApplyFor = $state(null);
+  let applyTerm = $state(MORTGAGE_TERMS[0]);
+  let applyDownPct = $state(0);
+
+  function openApply(idx) {
+    openApplyFor = idx;
+    applyTerm = MORTGAGE_TERMS[0];
+    applyDownPct = 0;
+  }
+  function closeApply() {
+    openApplyFor = null;
+  }
+  function submitApply(idx) {
+    send({
+      type: 'requestMortgageLoan',
+      spaceIndex: idx,
+      term: applyTerm,
+      downPaymentPct: applyDownPct
+    });
+    openApplyFor = null;
+  }
+
+  function applyPreview(spaceIndex) {
+    const sp = BOARD[spaceIndex];
+    if (!sp || !mortgageEligible) return null;
+    const baseRate = MORTGAGE_TIER_RATES[myTier.name][applyTerm];
+    const reserveRate = gs.economy?.reserveRate ?? 0;
+    const dpDiscount = downPaymentDiscount(applyDownPct);
+    const ptr = Math.max(0, Math.round((baseRate + reserveRate - dpDiscount) * 10000) / 10000);
+    const downPayment = Math.round((sp.mortgageValue ?? 0) * applyDownPct * 100) / 100;
+    const principal = Math.round((sp.mortgageValue ?? 0) * (1 - applyDownPct) * 100) / 100;
+    const totalDebt = Math.round(principal * (1 + ptr * applyTerm) * 100) / 100;
+    const installment = Math.round((totalDebt / applyTerm) * 100) / 100;
+    return { ptr, downPayment, principal, totalDebt, installment };
+  }
+
   const rows = $derived.by(() => {
     if (!me) return [];
     const out = [];
@@ -18,7 +64,6 @@
       const sp = BOARD[i];
       if (!sp || !isOwnable(sp)) continue;
       const mortgageValue = sp.mortgageValue ?? 0;
-      const unmortgageCost = Math.ceil(mortgageValue * (1 + MORTGAGE_INTEREST));
       const groupHasHouses =
         sp.type === 'property'
           ? (COLOR_GROUPS[sp.colorGroup] ?? []).some((idx) => (gs.properties[idx]?.houses ?? 0) > 0)
@@ -31,7 +76,6 @@
         houses: p.houses ?? 0,
         mortgaged: !!p.mortgaged,
         mortgageValue,
-        unmortgageCost,
         groupHasHouses
       });
     }
@@ -47,12 +91,6 @@
     ui.showPropertiesModal = false;
   }
 
-  function mortgage(i) {
-    send({ type: 'mortgage', spaceIndex: i });
-  }
-  function unmortgage(i) {
-    send({ type: 'unmortgage', spaceIndex: i });
-  }
   function sell(i, name) {
     if (!confirm(`Sell ${name} back to the bank?`)) return;
     send({ type: 'sellPropertyToBank', spaceIndex: i });
@@ -82,8 +120,7 @@
             <th>Property</th>
             <th>Houses</th>
             <th>State</th>
-            <th class="num">Mortgage</th>
-            <th class="num">Unmortgage</th>
+            <th class="num">Mortgage Value</th>
             <th class="actions-col">Actions</th>
           </tr>
         </thead>
@@ -106,23 +143,18 @@
                 {/if}
               </td>
               <td class="num">${fmt(r.mortgageValue)}</td>
-              <td class="num">${fmt(r.unmortgageCost)}</td>
               <td class="actions-col">
-                {#if r.mortgaged}
+                {#if !r.mortgaged}
                   <button
-                    onclick={() => unmortgage(r.i)}
-                    disabled={(me?.cash ?? 0) < r.unmortgageCost}
-                    title={(me?.cash ?? 0) < r.unmortgageCost ? 'Insufficient cash' : ''}
+                    onclick={() => openApply(r.i)}
+                    disabled={r.houses > 0 || r.groupHasHouses || !mortgageEligible}
+                    title={!mortgageEligible
+                      ? `Credit tier ${myTier.name} is ineligible for mortgage loans`
+                      : (r.houses > 0
+                        ? 'Sell houses first'
+                        : (r.groupHasHouses ? 'Group has houses' : ''))}
                   >
-                    Unmortgage
-                  </button>
-                {:else}
-                  <button
-                    onclick={() => mortgage(r.i)}
-                    disabled={r.houses > 0 || r.groupHasHouses}
-                    title={r.houses > 0 ? 'Sell houses first' : (r.groupHasHouses ? 'Group has houses' : '')}
-                  >
-                    Mortgage
+                    Mortgage…
                   </button>
                   <button
                     class="sell"
@@ -132,16 +164,68 @@
                   >
                     Sell to Bank
                   </button>
+                {:else}
+                  <span class="locked-note">Loan active — repay in Reserve › Loans</span>
                 {/if}
               </td>
             </tr>
+            {#if openApplyFor === r.i}
+              {@const preview = applyPreview(r.i)}
+              <tr class="apply-row">
+                <td colspan="5">
+                  <div class="apply-form">
+                    <div class="apply-head">
+                      Apply for mortgage loan on <strong>{r.name}</strong>
+                      (value ${fmt(r.mortgageValue)})
+                    </div>
+                    <div class="apply-controls">
+                      <label>
+                        Term
+                        <select bind:value={applyTerm}>
+                          {#each MORTGAGE_TERMS as t}<option value={t}>{t} turns</option>{/each}
+                        </select>
+                      </label>
+                      <label class="dp-label">
+                        Down payment {Math.round(applyDownPct * 100)}%
+                        <input
+                          type="range"
+                          min="0"
+                          max={MORTGAGE_MAX_DOWN_PAYMENT}
+                          step="0.05"
+                          bind:value={applyDownPct}
+                        />
+                      </label>
+                    </div>
+                    {#if preview}
+                      <div class="preview">
+                        <span>Rate <strong>{(preview.ptr * 100).toFixed(2)}%</strong>/turn</span>
+                        <span>Down <strong>${fmt(preview.downPayment)}</strong></span>
+                        <span>Principal <strong>${fmt(preview.principal)}</strong></span>
+                        <span>Installment <strong>${fmt(preview.installment)}</strong> × {applyTerm}</span>
+                        <span>Total <strong>${fmt(preview.totalDebt)}</strong></span>
+                      </div>
+                    {/if}
+                    <div class="apply-actions">
+                      <button onclick={closeApply}>Cancel</button>
+                      <button
+                        class="primary"
+                        onclick={() => submitApply(r.i)}
+                        disabled={!preview || (me?.cash ?? 0) < (preview?.downPayment ?? 0)}
+                      >
+                        Take loan
+                      </button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            {/if}
           {/each}
         </tbody>
       </table>
       <p class="hint">
-        Selling a property returns it to the bank for its mortgage value
-        (${fmt(rows[0]?.mortgageValue)}–${fmt(rows[rows.length - 1]?.mortgageValue)} per tile).
-        It must not be mortgaged or have houses, and the color group must have no houses.
+        A mortgage loan creates structured installments against a property using
+        it as collateral. Selling returns the property to the bank for its
+        mortgage value (no houses, no group with houses, no active mortgage).
       </p>
     {/if}
   </div>
@@ -222,5 +306,43 @@
     font-size: 0.78rem;
     color: var(--ink-mute);
     font-style: italic;
+  }
+  .locked-note {
+    font-size: 0.72rem;
+    color: var(--ink-mute);
+    font-style: italic;
+  }
+  .apply-row td {
+    background: rgba(46, 125, 50, 0.05);
+    border-bottom: 2px solid var(--accent);
+  }
+  .apply-form { display: flex; flex-direction: column; gap: 0.5rem; }
+  .apply-head { font-size: 0.85rem; }
+  .apply-controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .apply-controls label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.78rem;
+    gap: 0.2rem;
+  }
+  .dp-label input { width: 200px; }
+  .preview {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+    font-family: monospace;
+    color: var(--ink-mute);
+  }
+  .preview strong { color: var(--ink, inherit); }
+  .apply-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
   }
 </style>
