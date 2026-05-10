@@ -20,6 +20,7 @@ export function createAuction(spaceIndex, attempt = 0, now = Date.now()) {
     currentBid: 0,
     highBidder: null,
     endsAtMs: now + AUCTION_DURATION_MS,
+    hardEndsAtMs: now + AUCTION_DURATION_MS * 6,
     lastBidAtMs: null
   };
 }
@@ -48,7 +49,8 @@ export function applyBid(state, auction, seatIndex, amount, now = Date.now()) {
   auction.currentBid = amount;
   auction.highBidder = seatIndex;
   auction.lastBidAtMs = now;
-  auction.endsAtMs = now + AUCTION_DURATION_MS;
+  const hardCap = auction.hardEndsAtMs ?? (now + AUCTION_DURATION_MS * 6);
+  auction.endsAtMs = Math.min(now + AUCTION_DURATION_MS, hardCap);
   return { ok: true };
 }
 

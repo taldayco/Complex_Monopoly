@@ -46,18 +46,23 @@
     }
   }
 
+  function safeCash(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+
   function propose() {
     send({
       type: 'proposeTrade',
       toSeat: partnerSeat,
       offer: {
-        cash: offerCash,
+        cash: safeCash(offerCash),
         properties: offerProps,
         jailFreeChance: offerJailC,
         jailFreeCommunity: offerJailCC
       },
       request: {
-        cash: requestCash,
+        cash: safeCash(requestCash),
         properties: requestProps,
         jailFreeChance: requestJailC,
         jailFreeCommunity: requestJailCC

@@ -378,7 +378,7 @@ function doRollDice(state, action, ctx, log) {
   applyGoCardBonuses(state, action.seat, passedGo, log);
 
   resolveLanding(state, action.seat, ctx, log, { diceTotal: roll.total });
-  finalizeTurnPhase(state, roll.doubles);
+  finalizeTurnPhase(state);
   return {};
 }
 
@@ -411,6 +411,7 @@ function resolveLanding(state, seatIndex, ctx, log, opts = {}) {
     }
 
     case 'marketOpen': {
+      if (state.pendingCardChoice) return;
       const mo = startMarketOpen(state, seatIndex, ctx, seat.position);
       log('marketOpenStart', seatIndex, {
         spaceIndex: seat.position,
@@ -1243,11 +1244,14 @@ function doChooseLoanTarget(state, action, ctx, log) {
     state.rngCursor = (state.rngCursor ?? 0) + 1;
     const reserveRate = state.economy?.reserveRate ?? 0;
     const newPtr = Math.max(0, recomputeLoanPtr(seat, loan, roll, reserveRate));
-    loan.ptr = newPtr;
-    loan.totalDebt = Math.round(loan.principal * (1 + newPtr * loan.term) * 100) / 100;
+    const paidSoFar = Math.max(0, Math.round((loan.totalDebt - loan.balance) * 100) / 100);
+    const newTotalDebt = Math.round(loan.principal * (1 + newPtr * loan.term) * 100) / 100;
+    const newBalance = Math.max(0, Math.round((newTotalDebt - paidSoFar) * 100) / 100);
     const remainingPayments = Math.max(1, loan.term - loan.paymentsMade);
-    loan.installment = Math.round((loan.totalDebt / loan.term) * 100) / 100;
-    loan.balance = Math.round(loan.installment * remainingPayments * 100) / 100;
+    loan.ptr = newPtr;
+    loan.totalDebt = newTotalDebt;
+    loan.balance = newBalance;
+    loan.installment = Math.round((newBalance / remainingPayments) * 100) / 100;
     log('loanRefinanced', action.seat, { loanId, newPtr, roll });
   }
   state.pendingCardChoice = null;
@@ -1755,13 +1759,12 @@ function doWithdrawFromBank(state, action, ctx, log) {
 }
 
 // ---------- HELPERS ----------
-function finalizeTurnPhase(state, doubles) {
+function finalizeTurnPhase(state) {
   if (state.pendingAction) {
     state.turn.phase = 'resolving';
     return;
   }
   state.turn.phase = 'endable';
-  // doubles handled in doEndTurn (player must press End Turn / Roll Again themselves).
 }
 
 function recomputePhase(state) {

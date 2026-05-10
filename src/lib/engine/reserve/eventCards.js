@@ -13,6 +13,7 @@ import {
 } from '../../shared/reserve/stockCatalog.js';
 import { clampCreditScore } from '../../shared/reserve/loanCatalog.js';
 import { COLOR_GROUPS } from '../../shared/constants.js';
+import { BANKS } from '../../shared/reserve/economyCatalog.js';
 import { recalcFP500, buyShares, sellShares } from './stocks.js';
 
 let EFFECT_ID_COUNTER = 0;
@@ -437,15 +438,15 @@ function applyRegionalBankFailure(state, ctx) {
   const rng = ctx?.rng ?? Math.random;
   const die = Math.floor(rng() * 6) + 1;
   const bank = die % 2 === 1 ? 'mmcu' : 'boardwalk';
-  const FDIC_CAP = 5000;
+  const cap = BANKS[bank].fdicCap;
   const losses = [];
   for (const s of state.seats) {
     if (s.bankrupt) continue;
     const acct = s.bankAccounts?.[bank];
     if (!acct?.open) continue;
-    if ((acct.balance ?? 0) > FDIC_CAP) {
-      const lost = Math.round((acct.balance - FDIC_CAP) * 100) / 100;
-      acct.balance = FDIC_CAP;
+    if ((acct.balance ?? 0) > cap) {
+      const lost = Math.round((acct.balance - cap) * 100) / 100;
+      acct.balance = cap;
       losses.push({ seat: s.seat, lost });
     }
   }
@@ -557,16 +558,16 @@ function applyFinancialCrisis(state, inflationFreezeTurns = 10, interestFreezeTu
     kind: 'interestFreeze',
     expiresAtTurn: turnCount + interestFreezeTurns
   });
-  const FDIC_CAP = 5000;
   const losses = [];
   for (const s of state.seats ?? []) {
     if (s.bankrupt) continue;
     for (const bank of ['mmcu', 'boardwalk']) {
       const acct = s.bankAccounts?.[bank];
       if (!acct?.open) continue;
-      if ((acct.balance ?? 0) > FDIC_CAP) {
-        const lost = Math.round((acct.balance - FDIC_CAP) * 100) / 100;
-        acct.balance = FDIC_CAP;
+      const cap = BANKS[bank].fdicCap;
+      if ((acct.balance ?? 0) > cap) {
+        const lost = Math.round((acct.balance - cap) * 100) / 100;
+        acct.balance = cap;
         losses.push({ seat: s.seat, bank, lost });
       }
     }

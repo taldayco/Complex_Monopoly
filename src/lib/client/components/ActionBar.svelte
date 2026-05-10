@@ -93,9 +93,6 @@
     isMyTurn && turnPhase === 'endable' && !pending
   );
 
-  function openBuilds() {
-    ui.showProperties = !ui.showProperties;
-  }
 </script>
 
 <div class="action-bar">

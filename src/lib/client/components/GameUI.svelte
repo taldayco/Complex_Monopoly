@@ -72,13 +72,13 @@
 
   const inJailMyTurn = $derived(isMyTurn && me?.inJail && gs.turn.phase === 'preRoll');
 
-  // Auto-open the Market Monitor for everyone whenever a Market Open window
-  // is active. The user can also open it manually via the header button at
-  // any other time.
   const marketOpenActive = $derived(!!gs.marketOpen?.active);
   const marketMonitorOpen = $derived(marketOpenActive || ui.showMarketMonitor);
+  let prevMarketOpenActive = $state(false);
   $effect(() => {
-    if (marketOpenActive) ui.showMarketMonitor = true;
+    if (marketOpenActive && !prevMarketOpenActive) ui.showMarketMonitor = true;
+    else if (!marketOpenActive && prevMarketOpenActive) ui.showMarketMonitor = false;
+    prevMarketOpenActive = marketOpenActive;
   });
 </script>
 

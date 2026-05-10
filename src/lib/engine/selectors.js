@@ -97,6 +97,7 @@ export function totalHotelsOwned(state, seatIndex) {
 export function nextActiveSeatAfter(state, seatIndex) {
   const seats = state.seats;
   if (seats.length === 0) return null;
+  if (seatIndex < 0 || seatIndex >= seats.length) return null;
   for (let step = 1; step < seats.length; step++) {
     const next = (seatIndex + step) % seats.length;
     if (!seats[next].bankrupt) return next;

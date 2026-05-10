@@ -392,7 +392,6 @@ function scrubEconomy(econ) {
     inflationFactor: econ.inflationFactor ?? 1,
     deckSize: deck.length,
     wildsRemaining,
-    wildPool: Array.isArray(econ.wildPool) ? econ.wildPool : [],
     history: Array.isArray(econ.history) ? econ.history : [],
     lastFlip: econ.lastFlip ?? null,
     round: econ.round ?? 0

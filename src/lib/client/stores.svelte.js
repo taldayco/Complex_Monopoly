@@ -20,7 +20,6 @@ export const ui = $state({
   selectedSpaceIndex: null,
   showTrade: false,
   tradeTarget: null,
-  showProperties: false,
   showReserve: false,
   reserveTab: 'market', // 'market' | 'loans' | 'cards' | 'bank' | 'requests'
   showPropertiesModal: false,

@@ -29,15 +29,26 @@
     if (bidAmount < minBid) bidAmount = minBid;
   });
 
+  function clampedBid(raw) {
+    const cash = me?.cash ?? 0;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    if (n < minBid) return null;
+    if (n > cash) return null;
+    return Math.floor(n);
+  }
+
   function submitBid() {
-    const amt = Number(bidAmount);
-    if (!Number.isFinite(amt) || amt < minBid) return;
+    const amt = clampedBid(bidAmount);
+    if (amt == null) return;
     send({ type: 'bid', amount: amt });
   }
 
   function quickBid(delta) {
-    bidAmount = minBid + delta;
-    send({ type: 'bid', amount: bidAmount });
+    const amt = clampedBid(minBid + delta);
+    if (amt == null) return;
+    bidAmount = amt;
+    send({ type: 'bid', amount: amt });
   }
 </script>
 
