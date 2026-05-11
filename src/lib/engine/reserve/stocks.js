@@ -1,3 +1,4 @@
+import { cents } from '../../shared/money.js';
 // Pure helpers for the stock market. Mutates the slice of state passed in;
 // callers (the reducer) work on a structuredClone of the room.
 
@@ -10,6 +11,7 @@ import {
   WILDCARD_POOL,
   STOCK_HISTORY_CAP
 } from '../../shared/reserve/stockCatalog.js';
+import { seededRng, shuffleInPlace } from '../../shared/rng/seeded.js';
 
 export function createStocksState(rngSeed = 0, { primeHistory = true } = {}) {
   const market = {};
@@ -77,15 +79,6 @@ export function hydrateStocks(stocks, rngSeed = 0) {
   return stocks;
 }
 
-// Fisher-Yates using an injected RNG (the reducer's deterministic seeded one).
-function shuffle(arr, rng) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
 function buildDeckFor(symbol, rng) {
   const cat = STOCK_CATALOG[symbol];
   if (!cat || cat.type !== 'volatile') return [];
@@ -94,7 +87,7 @@ function buildDeckFor(symbol, rng) {
     ...BASE_CARDS.map((value) => ({ value, wild: false })),
     ...wilds.map((value) => ({ value, wild: true }))
   ];
-  return shuffle(cards, rng);
+  return shuffleInPlace(cards, rng);
 }
 
 // Pick two wildcard values uniformly at random from WILDCARD_POOL with
@@ -109,20 +102,13 @@ function pickRandomWildcards(rng) {
 }
 
 // Build a stock's deck deterministically from rngSeed alone — used at room
-// creation and on hydrate, when no live RNG is available. Mirrors the LCG
-// approach in createGame.js / eventCards.js. The per-symbol salt keeps each
-// stock's order independent of the others.
+// creation and on hydrate, when no live RNG is available. The per-symbol salt
+// keeps each stock's order independent of the others.
 function buildDeckSeeded(symbol, rngSeed) {
   const cat = STOCK_CATALOG[symbol];
   if (!cat || cat.type !== 'volatile') return [];
-  const idx = STOCK_ORDER.indexOf(symbol);
-  const salt = 11 + idx;
-  let s = ((rngSeed | 0) ^ (salt * 0x9e3779b1)) >>> 0;
-  const rand = () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 0x100000000;
-  };
-  return buildDeckFor(symbol, rand);
+  const salt = 11 + STOCK_ORDER.indexOf(symbol);
+  return buildDeckFor(symbol, seededRng(rngSeed, salt));
 }
 
 // Run a full deck-pass at game creation: drain every volatile stock's initial
@@ -187,7 +173,7 @@ function drawTopCard(stocks, symbol, rng) {
 function applyPercentToPrice(startPrice, currentPrice, pct) {
   const next = currentPrice + (startPrice * pct) / 100;
   if (!Number.isFinite(next)) return currentPrice;
-  return Math.max(0.01, Math.round(next * 100) / 100);
+  return Math.max(0.01, cents(next));
 }
 
 function pushHistory(market) {
@@ -205,7 +191,7 @@ export function recalcFP500(stocks) {
     .filter((p) => typeof p === 'number');
   if (prices.length === 0) return;
   const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-  fp.price = Math.max(0.01, Math.round(avg * 100) / 100);
+  fp.price = Math.max(0.01, cents(avg));
 }
 
 // Flip the entire market: draw one card per volatile stock, apply, recompute
@@ -267,7 +253,7 @@ export function setStockPrice(stocks, symbol, newPrice) {
   }
   const m = stocks.market[symbol];
   if (typeof newPrice !== 'number' || newPrice <= 0) return false;
-  m.price = Math.round(newPrice * 100) / 100;
+  m.price = cents(newPrice);
   pushHistory(m);
   recalcFP500(stocks);
   pushHistory(stocks.market[FP500_SYMBOL]);
@@ -279,12 +265,12 @@ export function buyShares(seat, stocks, symbol, qty) {
   if (!STOCK_CATALOG[symbol]) return { ok: false, error: 'UNKNOWN_STOCK' };
   if (!Number.isInteger(qty) || qty <= 0) return { ok: false, error: 'BAD_QTY' };
   const price = stocks.market[symbol]?.price ?? 0;
-  const cost = Math.round(price * qty * 100) / 100;
+  const cost = cents(price * qty);
   if (seat.cash < cost) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
 
-  seat.cash = Math.round((seat.cash - cost) * 100) / 100;
+  seat.cash = cents(seat.cash - cost);
   seat.stockLots[symbol] = (seat.stockLots[symbol] || 0) + qty;
-  seat.stockCostBasis[symbol] = Math.round(((seat.stockCostBasis[symbol] || 0) + cost) * 100) / 100;
+  seat.stockCostBasis[symbol] = cents((seat.stockCostBasis[symbol] || 0) + cost);
   return { ok: true, qty, cost, price };
 }
 
@@ -295,12 +281,12 @@ export function sellShares(seat, stocks, symbol, qty) {
   if (owned < qty) return { ok: false, error: 'INSUFFICIENT_SHARES' };
 
   const price = stocks.market[symbol]?.price ?? 0;
-  const proceeds = Math.round(price * qty * 100) / 100;
+  const proceeds = cents(price * qty);
   // Reduce cost basis proportionally so realised P&L tracks accurately.
   const basisShare = (seat.stockCostBasis[symbol] || 0) * (qty / owned);
-  seat.cash = Math.round((seat.cash + proceeds) * 100) / 100;
+  seat.cash = cents(seat.cash + proceeds);
   seat.stockLots[symbol] = owned - qty;
-  seat.stockCostBasis[symbol] = Math.round(((seat.stockCostBasis[symbol] || 0) - basisShare) * 100) / 100;
+  seat.stockCostBasis[symbol] = cents((seat.stockCostBasis[symbol] || 0) - basisShare);
   if (seat.stockLots[symbol] === 0) {
     seat.stockCostBasis[symbol] = 0;
   }

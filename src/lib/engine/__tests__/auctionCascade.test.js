@@ -1,19 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import {
   AUCTION_ATTEMPT_FRACTIONS,
   startPriceForAttempt,
   createAuction
 } from '../auction.js';
 import { BOARD } from '../../shared/board.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 test('AUCTION_ATTEMPT_FRACTIONS sequences 50% → 25% → 0', () => {
   assert.deepEqual(AUCTION_ATTEMPT_FRACTIONS, [0.5, 0.25, 0]);

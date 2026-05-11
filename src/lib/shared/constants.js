@@ -28,9 +28,6 @@ export const RAILROAD_RENT = [25, 50, 100, 200];
 
 export const UTILITY_MULT = [10, 15];
 
-export const INCOME_TAX = 200;
-export const LUXURY_TAX = 75;
-
 export const MAX_PLAYERS = 8;
 export const MIN_PLAYERS = 2;
 
@@ -52,7 +49,6 @@ export const RAILROAD_INDICES = [5, 15, 25, 35];
 export const UTILITY_INDICES = [12, 28];
 export const CHANCE_INDICES = [7, 22, 36];
 export const COMMUNITY_CHEST_INDICES = [2, 17, 33];
-export const TAX_INDICES = [4, 38];
 
 export const COLOR_GROUPS = {
   brown: [1, 3],

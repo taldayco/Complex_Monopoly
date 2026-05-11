@@ -1,6 +1,6 @@
 <script>
   import { BOARD } from '$lib/shared/board.js';
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { AUCTION_INCREMENT, AUCTION_DURATION_MS } from '$lib/shared/constants.js';
   import { onMount, onDestroy } from 'svelte';
 
@@ -41,14 +41,14 @@
   function submitBid() {
     const amt = clampedBid(bidAmount);
     if (amt == null) return;
-    send({ type: 'bid', amount: amt });
+    actions.bid({amount: amt});
   }
 
   function quickBid(delta) {
     const amt = clampedBid(minBid + delta);
     if (amt == null) return;
     bidAmount = amt;
-    send({ type: 'bid', amount: amt });
+    actions.bid({amount: amt});
   }
 </script>
 

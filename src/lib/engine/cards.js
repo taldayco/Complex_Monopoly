@@ -1,5 +1,6 @@
 import { CHANCE_CARDS } from '../shared/chance.js';
 import { COMMUNITY_CHEST_CARDS } from '../shared/communityChest.js';
+import { shuffled } from '../shared/rng/seeded.js';
 
 const DECKS = {
   chance: CHANCE_CARDS,
@@ -16,7 +17,7 @@ export function drawCard(state, deckName, rng) {
   const deck = state[deckName];
   if (deck.deck.length === 0) {
     if (deck.discard.length === 0) return { card: null, id: null };
-    deck.deck = shuffle(deck.discard, rng);
+    deck.deck = shuffled(deck.discard, rng);
     deck.discard = [];
   }
   const id = deck.deck.shift();
@@ -26,13 +27,4 @@ export function drawCard(state, deckName, rng) {
 
 export function returnCardToDiscard(state, deckName, id) {
   state[deckName].discard.push(id);
-}
-
-function shuffle(arr, rng) {
-  const out = arr.slice();
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
 }

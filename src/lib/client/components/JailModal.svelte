@@ -1,10 +1,10 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   let { state, me } = $props();
 
-  function rollForJail() { send({ type: 'rollForJail' }); }
-  function payJailFine() { send({ type: 'payJailFine' }); }
-  function useCard() { send({ type: 'useGetOutOfJail' }); }
+  function rollForJail() { actions.rollForJail(); }
+  function payJailFine() { actions.payJailFine(); }
+  function useCard() { actions.useGetOutOfJail(); }
 </script>
 
 <div class="overlay">

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step, stepWithEvents } from './helpers.js';
 import {
   createEconomyState,
   hydrateEconomy,
@@ -14,12 +14,6 @@ import {
   BASE_INF_INT_DECK,
   INF_INT_WILDCARD_POOL
 } from '../../shared/reserve/economyCatalog.js';
-
-function step(state, action, ctx) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error + ' on ' + action.type);
-  return { state: r.state, events: r.events };
-}
 
 
 test('createEconomyState seeds 32+2 cards with two wildcards in play', () => {
@@ -96,7 +90,7 @@ test('endTurn flips the economy once, advancing reserveRate or inflation', () =>
   const ctx = { rng: makeRng(11) };
   const before = { rate: s.economy.reserveRate, infl: s.economy.inflationFactor };
   s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
-  const r = step(s, { type: 'endTurn', seat: 0 }, ctx);
+  const r = stepWithEvents(s, { type: 'endTurn', seat: 0 }, ctx);
   s = r.state;
   assert.ok(s.economy.reserveRate >= before.rate);
   assert.ok(s.economy.inflationFactor >= before.infl);
@@ -108,7 +102,7 @@ test('turnCount increments once per end-turn (independent of stock cadence)', ()
   const ctx = { rng: makeRng(42) };
   for (let i = 0; i < 5; i++) {
     s.turn = { seat: s.turn.seat, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
-    s = step(s, { type: 'endTurn', seat: s.turn.seat }, ctx).state;
+    s = step(s, { type: 'endTurn', seat: s.turn.seat }, ctx);
   }
   assert.equal(s.turnCount, 5);
 });

@@ -1,14 +1,9 @@
 import { initRooms, setPersistence } from './roomManager.js';
 import { handleMessage, handleConnect, handleDisconnect, runServerAction } from './dispatch.js';
 import { createDOPersistence } from './doPersistence.js';
-import { setTimerImpl } from './auctionTimer.js';
+import { setTimerImpl, KIND_TO_ACTION } from './auctionTimer.js';
 
 const PENDING_TIMERS_KEY = 'pendingTimers';
-
-const KIND_TO_ACTION = {
-  auction: 'auctionTick',
-  market: 'marketOpenTick'
-};
 
 // Single Durable Object instance (singleton via idFromName('default')) that
 // owns every room. WebSockets attach here; messages flow through the same

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { transferToCreditor, returnToBank, liquidateBuildings, checkGameOver } from '../bankruptcy.js';
 import { makeRoom, giveProperty } from './helpers.js';
 
-test('transferToCreditor moves cash and properties', () => {
+test('transferToCreditor moves cash + unmortgaged properties; mortgaged ones forfeit to bank', () => {
   const room = makeRoom(2);
   room.seats[0].cash = 50;
   room.seats[1].cash = 100;
@@ -16,9 +16,8 @@ test('transferToCreditor moves cash and properties', () => {
   assert.equal(room.seats[0].cash, 0);
   assert.equal(room.seats[1].cash, 150);
   assert.equal(room.properties[1].ownerSeat, 1);
-  assert.equal(room.properties[3].ownerSeat, 1);
-  // Mortgaged status preserved.
-  assert.equal(room.properties[3].mortgaged, true);
+  assert.equal(room.properties[3].ownerSeat, null);
+  assert.equal(room.properties[3].mortgaged, false);
 });
 
 test('liquidateBuildings sells all houses to bank', () => {
@@ -69,4 +68,42 @@ test('checkGameOver returns false with multiple solvent players', () => {
   const over = checkGameOver(room);
   assert.equal(over, false);
   assert.equal(room.phase, 'playing');
+});
+
+test('transferToCreditor wipes the debtor standard loans, credit-card balances, and pendings', () => {
+  const room = makeRoom(2);
+  const debtor = room.seats[0];
+  debtor.cash = 0;
+  debtor.loans = [
+    { id: 'L-1', status: 'active', balance: 500, source: undefined, dueThisTurn: true },
+    { id: 'M-1', status: 'active', balance: 300, source: 'mortgage' }
+  ];
+  debtor.creditCards = [
+    { id: 'CC-1', cardId: 'goRewards', status: 'active', balance: 250 }
+  ];
+  room.pendingTransfers = [
+    { id: 'TR-1', fromSeat: 0, toSeat: 1, amount: 50, status: 'pending' },
+    { id: 'TR-2', fromSeat: 1, toSeat: 0, amount: 75, status: 'pending' }
+  ];
+  room.pendingAction = { type: 'settleDebt', debtorSeat: 0, amount: 100, creditor: { kind: 'player', seat: 1 } };
+
+  transferToCreditor(room, 0, 1);
+
+  assert.equal(debtor.bankrupt, true);
+  // Standard loan closed, balance zero.
+  assert.equal(debtor.loans[0].status, 'closed');
+  assert.equal(debtor.loans[0].balance, 0);
+  // Mortgage-source loan tagged forfeited (audit trail).
+  assert.equal(debtor.loans[1].status, 'forfeited');
+  assert.equal(debtor.loans[1].balance, 0);
+  // Credit card cancelled with zero balance.
+  assert.equal(debtor.creditCards[0].status, 'cancelled');
+  assert.equal(debtor.creditCards[0].balance, 0);
+  assert.equal(debtor.creditCards[0].cancelReason, 'bankruptcy');
+  // Pending transfers + settleDebt for the bankrupt seat are cleared.
+  assert.equal(room.pendingTransfers.length, 0);
+  assert.equal(room.pendingAction, null);
+  // Two-player game with one bankrupt → game-over fires automatically.
+  assert.equal(room.phase, 'finished');
+  assert.equal(room.winnerSeat, 1);
 });

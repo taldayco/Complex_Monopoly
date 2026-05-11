@@ -1,18 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng, giveProperty } from './helpers.js';
+import { makeRoom, makeRng, giveProperty, step } from './helpers.js';
 import { applyHysaInterestAtTurnStart } from '../reserve/banking.js';
 import { processCardCycle } from '../reserve/cards.js';
 import { markLoansDueAtTurnStart } from '../reserve/loans.js';
 import { markMortgageLoansDueAtTurnStart, requestMortgageLoan } from '../mortgage.js';
 import { sendToJailWithSeizure, seizePropertyToBank } from '../jail.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 test('jailed seat cannot buy stock', () => {
   let s = makeRoom(2);
@@ -164,6 +158,46 @@ test('seizePropertyToBank clears mortgage and houses', () => {
   assert.equal(room.properties[1].ownerSeat, null);
   assert.equal(room.properties[1].mortgaged, false);
   assert.equal(room.properties[1].houses, 0);
+});
+
+test('seizePropertyToBank returns houses on the seized property to the bank pool', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 1, { houses: 3 });
+  const housesBefore = room.bank.housesAvailable;
+  seizePropertyToBank(room, 0, 1);
+  assert.equal(room.bank.housesAvailable, housesBefore + 3);
+});
+
+test('seizePropertyToBank returns hotel as one hotel back to the bank pool', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 0, 1, { houses: 5 });
+  const hotelsBefore = room.bank.hotelsAvailable;
+  const housesBefore = room.bank.housesAvailable;
+  seizePropertyToBank(room, 0, 1);
+  assert.equal(room.bank.hotelsAvailable, hotelsBefore + 1);
+  assert.equal(room.bank.housesAvailable, housesBefore);
+});
+
+test('jailed seat with open settleDebt may sellHouse to raise cash', () => {
+  let s = makeRoom(2);
+  giveProperty(s, 0, 1, { houses: 1 });
+  s.seats[0].inJail = true;
+  s.pendingAction = {
+    type: 'settleDebt', debtorSeat: 0, amount: 100,
+    creditor: { kind: 'bank' }, source: { type: 'tax' }
+  };
+  const r = reducer(s, { type: 'sellHouse', seat: 0, spaceIndex: 1 }, { rng: makeRng() });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.state.properties[1].houses, 0);
+});
+
+test('jailed seat with no settleDebt is still blocked from selling houses', () => {
+  let s = makeRoom(2);
+  giveProperty(s, 0, 1, { houses: 1 });
+  s.seats[0].inJail = true;
+  const r = reducer(s, { type: 'sellHouse', seat: 0, spaceIndex: 1 }, { rng: makeRng() });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'JAILED');
 });
 
 test('endTurn is blocked while pendingJailSeizureChoice is unresolved', () => {

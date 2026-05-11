@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import {
   applyForCard,
   requestCreditLineIncrease,
@@ -15,12 +15,6 @@ import {
   CREDIT_LINE_INCREASE_PENALTY,
   UTILIZATION_BUCKETS
 } from '../../shared/reserve/cardCatalog.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 test('calcCreditLine: dynamic formula with $10 rounding, floored at minLine', () => {
   const seat = { cash: 1000, creditScore: 720 };

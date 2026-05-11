@@ -1,6 +1,7 @@
 import { JAIL_INDEX, JAIL_FINE, JAIL_MAX_TURNS } from '../shared/constants.js';
 import { rollDice } from './movement.js';
 import { inflatedPrice } from '../shared/economy/inflation.js';
+import { cents } from '../shared/money.js';
 
 export function sendToJail(seat) {
   seat.position = JAIL_INDEX;
@@ -31,6 +32,16 @@ export function ownedSeizableSpaceIndices(state, seatIndex) {
 export function seizePropertyToBank(state, seatIndex, spaceIndex) {
   const prop = state.properties[spaceIndex];
   if (!prop || prop.ownerSeat !== seatIndex) return { error: 'NOT_OWNER' };
+  // Houses on the seized property go back to the bank pool. Without this the
+  // bank's `housesAvailable` count silently drains every time the jail-seizure
+  // path fires, eventually starving every player of buildable houses.
+  if (prop.houses > 0 && state.bank) {
+    if (prop.houses === 5) {
+      state.bank.hotelsAvailable = (state.bank.hotelsAvailable ?? 0) + 1;
+    } else {
+      state.bank.housesAvailable = (state.bank.housesAvailable ?? 0) + prop.houses;
+    }
+  }
   prop.ownerSeat = null;
   prop.mortgaged = false;
   prop.houses = 0;
@@ -47,7 +58,7 @@ export function attemptJailExit(state, seat, strategy, rng) {
 
   if (strategy === 'pay') {
     if (seat.cash < fine) return { error: 'INSUFFICIENT_FUNDS' };
-    seat.cash = Math.round((seat.cash - fine) * 100) / 100;
+    seat.cash = cents(seat.cash - fine);
     seat.inJail = false;
     seat.jailTurns = 0;
     return { released: true, fine };
@@ -81,7 +92,7 @@ export function attemptJailExit(state, seat, strategy, rng) {
       if (seat.cash < fine) {
         return { released: false, mustPay: true, roll, insolvent: true, fine };
       }
-      seat.cash = Math.round((seat.cash - fine) * 100) / 100;
+      seat.cash = cents(seat.cash - fine);
       seat.inJail = false;
       seat.jailTurns = 0;
       return { released: true, mustPay: true, roll, fine };

@@ -1,12 +1,12 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { BOARD } from '$lib/shared/board.js';
 
   let { pending, state } = $props();
 
   function forfeit(spaceIndex) {
     if (!confirm(`Forfeit ${BOARD[spaceIndex]?.name ?? 'this property'} to the bank?`)) return;
-    send({ type: 'chooseJailSeizure', spaceIndex });
+    actions.chooseJailSeizure({spaceIndex});
   }
 </script>
 

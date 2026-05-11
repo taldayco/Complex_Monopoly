@@ -1,19 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import {
   STOCK_CATALOG,
   VOLATILE_STOCK_ORDER,
   FP500_SYMBOL
 } from '../../shared/reserve/stockCatalog.js';
 import { createStocksState, flipMarket, buyShares, sellShares, recalcFP500 } from '../reserve/stocks.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 test('createStocksState (no priming) seeds catalog prices and FP500 history', () => {
   const s = createStocksState(0, { primeHistory: false });

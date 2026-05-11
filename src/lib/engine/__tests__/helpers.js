@@ -1,4 +1,18 @@
 import { createInitialRoom, newSeat } from '../createGame.js';
+import { reducer } from '../reducer.js';
+
+// Run one action through the reducer; throw on error so tests fail fast at
+// the call site rather than after a downstream assertion. Returns the new
+// state; use `stepWithEvents` instead when a test needs to inspect the log.
+export function step(state, action, ctx) {
+  return stepWithEvents(state, action, ctx).state;
+}
+
+export function stepWithEvents(state, action, ctx) {
+  const r = reducer(state, action, ctx ?? { rng: makeRng() });
+  if (!r.ok) throw new Error('reducer error: ' + r.error + ' on ' + action.type);
+  return { state: r.state, events: r.events };
+}
 
 export function makeRng(seed = 1) {
   let s = seed >>> 0;

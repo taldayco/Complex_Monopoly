@@ -1,4 +1,5 @@
 <script>
+  import { fmtPrice as fmt } from '$lib/client/format.js';
   import { ui } from '$lib/client/stores.svelte.js';
   import { getHysaRateFor } from '$lib/shared/reserve/cardCatalog.js';
   import MarketPanel from './MarketPanel.svelte';
@@ -27,10 +28,6 @@
     ui.showReserve = false;
   }
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
 
   function tierFor(score) {
     if (typeof score !== 'number') return '—';

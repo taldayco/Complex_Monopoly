@@ -1,5 +1,5 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { BOARD } from '$lib/shared/board.js';
 
   let { pending } = $props();
@@ -7,10 +7,10 @@
   const fromName = $derived(BOARD[pending.fromIdx]?.name ?? `Space ${pending.fromIdx}`);
 
   function travel(spaceIndex) {
-    send({ type: 'chooseTrainDestination', spaceIndex });
+    actions.chooseTrainDestination({spaceIndex});
   }
   function skip() {
-    send({ type: 'skipTrainTravel' });
+    actions.skipTrainTravel();
   }
 </script>
 

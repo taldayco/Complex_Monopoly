@@ -1,7 +1,8 @@
 <script>
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { connect, send } from '$lib/client/socket.js';
+  import { connect } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { conn, session, game } from '$lib/client/stores.svelte.js';
   import { listSessions, clearSession } from '$lib/client/localSession.js';
   import { TOKEN_PIECES } from '$lib/shared/constants.js';
@@ -24,17 +25,14 @@
 
   function handleCreate() {
     if (!name.trim()) return;
-    send({ type: 'createRoom', name: name.trim(), tokenPiece });
+    actions.createRoom({name: name.trim(), tokenPiece});
   }
 
   function handleJoin() {
     if (!name.trim() || !joinCode.trim()) return;
-    send({
-      type: 'joinRoom',
-      roomCode: joinCode.trim().toUpperCase(),
+    actions.joinRoom({roomCode: joinCode.trim().toUpperCase(),
       name: name.trim(),
-      tokenPiece
-    });
+      tokenPiece});
   }
 
   function rejoin(s) {

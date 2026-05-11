@@ -1,3 +1,4 @@
+import { cents } from '../../shared/money.js';
 // Player-to-player money transfers. Two flows:
 //   1. wireTransfer — instant: sender debits, receiver credits.
 //   2. transferRequest — sender of the request is the would-be receiver; the
@@ -6,15 +7,11 @@
 // All helpers mutate the state slice they are given; the reducer wraps every
 // call in a structuredClone of the room.
 
-let TRANSFER_ID_COUNTER = 0;
-function genTransferId() {
-  TRANSFER_ID_COUNTER += 1;
-  return `TR-${TRANSFER_ID_COUNTER}-${Date.now()}`;
-}
+import { newTransferId as genTransferId } from '../../shared/ids.js';
 
 function sanitizeAmount(amount) {
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return null;
-  return Math.round(amount * 100) / 100;
+  return cents(amount);
 }
 
 function sanitizeNote(note) {
@@ -34,8 +31,8 @@ export function doWireTransfer(state, fromSeatIdx, toSeatIdx, amount) {
   if (amt == null) return { error: 'BAD_AMOUNT' };
   if (sender.cash < amt) return { error: 'INSUFFICIENT_FUNDS' };
 
-  sender.cash = Math.round((sender.cash - amt) * 100) / 100;
-  receiver.cash = Math.round((receiver.cash + amt) * 100) / 100;
+  sender.cash = cents(sender.cash - amt);
+  receiver.cash = cents(receiver.cash + amt);
   return { ok: true, amount: amt };
 }
 
@@ -89,8 +86,8 @@ export function respondTransferRequest(state, requestId, responderSeatIdx, appro
   if (!target || !requester) return { error: 'NO_SEAT' };
   if (target.bankrupt) return { error: 'BANKRUPT' };
   if (target.cash < req.amount) return { error: 'INSUFFICIENT_FUNDS' };
-  target.cash = Math.round((target.cash - req.amount) * 100) / 100;
-  requester.cash = Math.round((requester.cash + req.amount) * 100) / 100;
+  target.cash = cents(target.cash - req.amount);
+  requester.cash = cents(requester.cash + req.amount);
   list.splice(idx, 1);
   return { ok: true, approved: true, request: req };
 }

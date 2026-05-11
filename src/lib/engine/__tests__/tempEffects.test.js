@@ -118,7 +118,7 @@ test('nextDevModifier reduces dev cost by amount and is consumed after buyHouse'
   const s = makeRoom(2);
   giveProperty(s, 0, 1);
   s.seats[0].cash = 5000;
-  s.seats[0].nextDevModifier = { amount: -0.25, consumed: false };
+  s.seats[0].nextDevModifier = { amount: -0.25 };
   const before = s.seats[0].cash;
   const r = canBuyHouse(s, 0, 1);
   assert.equal(r.ok, true);
@@ -133,7 +133,7 @@ test('nextPermitFeeModifier reduces permit fees and is consumed after buyHouse',
   giveProperty(s, 0, 1);
   giveProperty(s, 1, 3);
   s.seats[0].cash = 5000;
-  s.seats[0].nextPermitFeeModifier = { amount: -0.5, consumed: false };
+  s.seats[0].nextPermitFeeModifier = { amount: -0.5 };
   const fees = calcPermitFees(s, 0, 1, 50);
   assert.equal(fees.feePerProperty, 6.25);
   buyHouse(s, 0, 1);

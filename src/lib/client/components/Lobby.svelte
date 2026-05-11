@@ -1,5 +1,5 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { session } from '$lib/client/stores.svelte.js';
   import { MIN_PLAYERS, MAX_PLAYERS } from '$lib/shared/constants.js';
 
@@ -9,11 +9,11 @@
   const canStart = $derived(state.seats.length >= MIN_PLAYERS);
 
   function start() {
-    send({ type: 'startGame' });
+    actions.startGame();
   }
 
   function leave() {
-    send({ type: 'leaveRoom' });
+    actions.leaveRoom();
     location.href = '/';
   }
 </script>

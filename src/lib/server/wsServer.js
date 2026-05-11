@@ -1,15 +1,10 @@
 import { initRooms, setPersistence } from './roomManager.js';
 import { handleMessage, handleConnect, handleDisconnect, runServerAction } from './dispatch.js';
 import { filePersistence } from './persistence.js';
-import { setTimerImpl } from './auctionTimer.js';
+import { setTimerImpl, KIND_TO_ACTION } from './auctionTimer.js';
 
 let initialized = false;
 const nodeTimers = new Map(); // kind -> { handle, roomCode }
-
-const KIND_TO_ACTION = {
-  auction: 'auctionTick',
-  market: 'marketOpenTick'
-};
 
 function installNodeTimers() {
   setTimerImpl({

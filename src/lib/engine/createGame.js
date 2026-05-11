@@ -12,6 +12,7 @@ import { createStocksState, hydrateStocks } from './reserve/stocks.js';
 import { createReserveDeckState, hydrateReserveDecks } from './reserve/eventCards.js';
 import { createEconomyState, hydrateEconomy } from './reserve/economy.js';
 import { ensureSeatBankAccounts } from './reserve/banking.js';
+import { seededRng, shuffleInPlace } from '../shared/rng/seeded.js';
 
 export function createInitialRoom({ code, hostPlayerToken, rngSeed }) {
   return {
@@ -91,7 +92,6 @@ export function newSeat({ seat, playerToken, name, tokenPiece }) {
 
 export function hydrateRoom(room) {
   if (!room || typeof room !== 'object') return room;
-  delete room.bankerMode;
   if (!Array.isArray(room.pendingAuctions)) room.pendingAuctions = [];
   if (!Array.isArray(room.pendingRequests)) room.pendingRequests = [];
   if (!Array.isArray(room.pendingTransfers)) room.pendingTransfers = [];
@@ -102,13 +102,6 @@ export function hydrateRoom(room) {
   hydrateReserveDecks(room);
   if (Array.isArray(room.seats)) {
     for (const s of room.seats) hydrateSeat(s);
-    for (const s of room.seats) {
-      if (Array.isArray(s.loans)) {
-        for (const l of s.loans) {
-          if (l && typeof l === 'object' && !l.bank) l.bank = 'mmcu';
-        }
-      }
-    }
   }
   return room;
 }
@@ -136,7 +129,6 @@ function hydrateSeat(s) {
   if (typeof s.mortgageTurnResponded !== 'boolean') s.mortgageTurnResponded = true;
   if (s.pendingLoanOffer === undefined) s.pendingLoanOffer = null;
   if (!s.revealedWildcards || typeof s.revealedWildcards !== 'object') s.revealedWildcards = {};
-  delete s.hysaRate;
   ensureSeatBankAccounts(s);
 }
 
@@ -151,15 +143,5 @@ function makeInitialProperties() {
 }
 
 function shuffleIds(cards, seed, salt) {
-  const ids = cards.map((c) => c.id);
-  let s = (seed ^ (salt * 0x9e3779b1)) >>> 0;
-  const rand = () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 0x100000000;
-  };
-  for (let i = ids.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-  }
-  return ids;
+  return shuffleInPlace(cards.map((c) => c.id), seededRng(seed, salt));
 }

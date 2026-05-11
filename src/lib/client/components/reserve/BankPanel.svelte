@@ -1,5 +1,6 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { fmtPrice as fmt, fmtRate as fmtPct } from '$lib/client/format.js';
+  import { actions } from '$lib/client/actions.js';
   import { BANKS, BANK_IDS } from '$lib/shared/reserve/economyCatalog.js';
   import { CARD_CATALOG, getHysaRateFor } from '$lib/shared/reserve/cardCatalog.js';
 
@@ -28,15 +29,7 @@
     }
   });
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
 
-  function fmtPct(p) {
-    if (typeof p !== 'number') return '—';
-    return (p * 100).toFixed(2) + '%';
-  }
 
   function accountFor(bank) {
     return me?.bankAccounts?.[bank] ?? { open: false, balance: 0, openedAt: 0 };
@@ -73,25 +66,25 @@
   }
 
   function open(bank) {
-    send({ type: 'openBankAccount', bank });
+    actions.openBankAccount({bank});
   }
   function close(bank) {
-    send({ type: 'closeBankAccount', bank });
+    actions.closeBankAccount({bank});
   }
   function deposit(bank) {
     const amount = Number(depositInputs[bank]);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    send({ type: 'depositToBank', bank, amount });
+    actions.depositToBank({bank, amount});
   }
   function withdraw(bank) {
     const amount = Number(withdrawInputs[bank]);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    send({ type: 'withdrawFromBank', bank, amount });
+    actions.withdrawFromBank({bank, amount});
   }
   function wire() {
     const amt = Number(wireAmount);
     if (!Number.isFinite(amt) || amt <= 0 || wireToSeat == null) return;
-    send({ type: 'wireTransfer', toSeat: wireToSeat, amount: amt });
+    actions.wireTransfer({toSeat: wireToSeat, amount: amt});
     wireAmount = 50;
   }
 

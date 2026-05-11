@@ -1,10 +1,11 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { BOARD, isOwnable } from '$lib/shared/board.js';
   import { COLOR_GROUPS, BUY_MORTGAGE_PTR, BUY_MORTGAGE_TERMS } from '$lib/shared/constants.js';
   import { getTierByScore } from '$lib/shared/reserve/loanCatalog.js';
   import { CARD_CATALOG } from '$lib/shared/reserve/cardCatalog.js';
   import { ui, openReserve } from '$lib/client/stores.svelte.js';
+  import { cents } from '$lib/shared/money.js';
 
   // Alias the `state` prop to `gs` locally — having a variable literally
   // named `state` in scope makes the Svelte 5 compiler treat the `$state`
@@ -26,21 +27,18 @@
     return groups;
   });
 
-  function buy() { send({ type: 'buyProperty' }); }
-  function decline() { send({ type: 'declineToBuy' }); }
-  function roll() { send({ type: 'rollDice' }); }
-  function endTurn() { send({ type: 'endTurn' }); }
-  function rollForJail() { send({ type: 'rollForJail' }); }
-  function payJailFine() { send({ type: 'payJailFine' }); }
-  function useJailCard() { send({ type: 'useGetOutOfJail' }); }
+  function buy() { actions.buyProperty(); }
+  function decline() { actions.declineToBuy(); }
+  function roll() { actions.rollDice(); }
+  function endTurn() { actions.endTurn(); }
+  function rollForJail() { actions.rollForJail(); }
+  function payJailFine() { actions.payJailFine(); }
+  function useJailCard() { actions.useGetOutOfJail(); }
 
   let mortgageTerm = $state(BUY_MORTGAGE_TERMS[0]);
   function buyWithMortgage() {
-    send({
-      type: 'buyPropertyWithMortgage',
-      term: mortgageTerm,
-      spaceIndex: pending?.spaceIndex
-    });
+    actions.buyPropertyWithMortgage({term: mortgageTerm,
+      spaceIndex: pending?.spaceIndex});
   }
   const mortgageEligible = $derived(
     me ? getTierByScore(me.creditScore ?? 0).name !== 'Poor' : false
@@ -49,8 +47,8 @@
     if (!pending || pending.type !== 'buyDecision') return null;
     const principal = pending.price;
     const term = mortgageTerm;
-    const totalDebt = Math.round(principal * (1 + BUY_MORTGAGE_PTR * term) * 100) / 100;
-    const installment = Math.round((totalDebt / term) * 100) / 100;
+    const totalDebt = cents(principal * (1 + BUY_MORTGAGE_PTR * term));
+    const installment = cents(totalDebt / term);
     return { principal, term, totalDebt, installment };
   });
 
@@ -69,11 +67,8 @@
       });
   });
   function buyWithCard(instanceId) {
-    send({
-      type: 'buyPropertyWithCard',
-      instanceId,
-      spaceIndex: pending?.spaceIndex
-    });
+    actions.buyPropertyWithCard({instanceId,
+      spaceIndex: pending?.spaceIndex});
   }
 
   const canBuyDecision = $derived(
@@ -212,8 +207,8 @@
               <span class="houses-label">
                 {p.houses === 5 ? 'Hotel' : `${p.houses} houses`}
               </span>
-              <button onclick={() => send({ type: 'buyHouse', spaceIndex: i })}>+</button>
-              <button onclick={() => send({ type: 'sellHouse', spaceIndex: i })}>−</button>
+              <button onclick={() => actions.buyHouse({spaceIndex: i})}>+</button>
+              <button onclick={() => actions.sellHouse({spaceIndex: i})}>−</button>
             </div>
           {/if}
         {/each}

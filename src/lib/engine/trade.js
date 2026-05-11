@@ -1,4 +1,5 @@
 import { BOARD, isOwnable } from '../shared/board.js';
+import { cents } from '../shared/money.js';
 
 export function validateTrade(state, trade) {
   const a = state.seats[trade.fromSeat];
@@ -35,8 +36,8 @@ export function executeTrade(state, trade) {
 
   const aGivesCash = trade.offer.cash ?? 0;
   const bGivesCash = trade.request.cash ?? 0;
-  a.cash = Math.round((a.cash + bGivesCash - aGivesCash) * 100) / 100;
-  b.cash = Math.round((b.cash + aGivesCash - bGivesCash) * 100) / 100;
+  a.cash = cents(a.cash + bGivesCash - aGivesCash);
+  b.cash = cents(b.cash + aGivesCash - bGivesCash);
 
   for (const idx of trade.offer.properties ?? []) {
     state.properties[idx].ownerSeat = b.seat;

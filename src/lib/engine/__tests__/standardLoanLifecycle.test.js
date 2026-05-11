@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import {
   calcLoanOptions,
   calcMaxStandardLoan,
@@ -13,12 +13,6 @@ import {
   STANDARD_LOANS_PER_TURN,
   clampCreditScore
 } from '../../shared/reserve/loanCatalog.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 test('PTR table matches spec per tier per dice pip', () => {
   assert.deepEqual(PTR_BY_TIER_AND_DICE.Excellent, [0.03, 0.035, 0.04, 0.045, 0.05, 0.055]);

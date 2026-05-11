@@ -1,3 +1,4 @@
+import { cents, round4 } from '../money.js';
 import {
   CREDIT_TIERS,
   TIER_BY_NAME,
@@ -261,7 +262,7 @@ export function getHysaRateFor(seat, baseRate) {
       bonus += card.benefits.hysaBonus;
     }
   }
-  return Math.max(0, Math.round((base + bonus) * 10000) / 10000);
+  return Math.max(0, round4(base + bonus));
 }
 
 function sumBenefit(seat, key) {
@@ -323,5 +324,5 @@ export function getFirstInstallmentCoverageFor(seat, loan) {
   const cap = (loan.totalDebt ?? 0) - (loan.principal ?? 0) - FIRST_INSTALLMENT_RECOVERY_FLOOR;
   if (cap <= 0) return 0;
   const due = Math.min(loan.installment ?? 0, loan.balance ?? 0);
-  return Math.round(Math.min(due, cap) * 100) / 100;
+  return cents(Math.min(due, cap));
 }

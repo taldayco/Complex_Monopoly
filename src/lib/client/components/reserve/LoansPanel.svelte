@@ -1,5 +1,6 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { fmtPrice as fmt, fmtRate as fmtPct } from '$lib/client/format.js';
+  import { actions } from '$lib/client/actions.js';
   import { getTierByScore, LOAN_TERMS } from '$lib/shared/reserve/loanCatalog.js';
   import { getMaxLineFor } from '$lib/shared/reserve/cardCatalog.js';
 
@@ -21,43 +22,35 @@
 
   let amountInput = $state(100);
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  function fmtPct(p) {
-    if (typeof p !== 'number') return '—';
-    return (p * 100).toFixed(2) + '%';
-  }
 
   function apply() {
     const amount = Number(amountInput);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    send({ type: 'requestLoan', amount });
+    actions.requestLoan({amount});
   }
   function accept(term) {
-    send({ type: 'respondLoanOffer', term });
+    actions.respondLoanOffer({term});
   }
   function decline() {
-    send({ type: 'respondLoanOffer', decline: true });
+    actions.respondLoanOffer({decline: true});
   }
   function payInstallment(loanId) {
-    send({ type: 'payLoanInstallment', loanId });
+    actions.payLoanInstallment({loanId});
   }
   function skipInstallment(loanId) {
-    send({ type: 'skipLoanInstallment', loanId });
+    actions.skipLoanInstallment({loanId});
   }
   function payoff(loanId) {
-    send({ type: 'payoffLoan', loanId });
+    actions.payoffLoan({loanId});
   }
   function payMortgage(loanId) {
-    send({ type: 'payMortgageInstallment', loanId });
+    actions.payMortgageInstallment({loanId});
   }
   function skipMortgage(loanId) {
-    send({ type: 'skipMortgageInstallment', loanId });
+    actions.skipMortgageInstallment({loanId});
   }
   function payoffMortgage(loanId) {
-    send({ type: 'payoffMortgageLoan', loanId });
+    actions.payoffMortgageLoan({loanId});
   }
 
   const overMax = $derived(Number(amountInput) > maxLine);

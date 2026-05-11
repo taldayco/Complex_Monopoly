@@ -1,14 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import { AUCTION_DURATION_MS } from '../../shared/constants.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 function setEndable(s, seat = 0) {
   s.turn = { seat, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };

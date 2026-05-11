@@ -1,5 +1,5 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { session } from '$lib/client/stores.svelte.js';
 
   let { state } = $props();
@@ -19,7 +19,7 @@
   }
 
   function roll() {
-    send({ type: 'rollForOrder' });
+    actions.rollForOrder();
   }
 </script>
 

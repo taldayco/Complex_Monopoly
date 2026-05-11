@@ -2,7 +2,8 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { connect, send } from '$lib/client/socket.js';
+  import { connect } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { conn, session, game } from '$lib/client/stores.svelte.js';
   import { loadSession } from '$lib/client/localSession.js';
   import Lobby from '$lib/client/components/Lobby.svelte';
@@ -35,7 +36,7 @@
     if (typeof window !== 'undefined') {
       // Page-load case where the WS was opened before this mount: the open
       // handler already fired, so we need to explicitly send auth now.
-      send({ type: 'auth', roomCode: s.roomCode, playerToken: s.playerToken });
+      actions.auth({roomCode: s.roomCode, playerToken: s.playerToken});
     }
   });
 

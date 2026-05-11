@@ -1,6 +1,7 @@
 import { BOARD, isOwnable } from '../shared/board.js';
 import { COLOR_GROUPS, RAILROAD_INDICES, UTILITY_INDICES } from '../shared/constants.js';
 import { inflatedPrice } from '../shared/economy/inflation.js';
+import { cents } from '../shared/money.js';
 
 export function activeSeats(state) {
   return state.seats.filter((s) => !s.bankrupt);
@@ -26,12 +27,20 @@ export function ownsAllInGroup(state, seatIndex, colorGroup) {
   return indices.every((i) => state.properties[i]?.ownerSeat === seatIndex);
 }
 
+// Mortgaged railroads / utilities do not contribute to rent multipliers — same
+// rule as classic Monopoly. Excluded here so `rent.js` reads the right count.
 export function ownedRailroadCount(state, seatIndex) {
-  return RAILROAD_INDICES.filter((i) => state.properties[i]?.ownerSeat === seatIndex).length;
+  return RAILROAD_INDICES.filter((i) => {
+    const p = state.properties[i];
+    return p?.ownerSeat === seatIndex && !p.mortgaged;
+  }).length;
 }
 
 export function ownedUtilityCount(state, seatIndex) {
-  return UTILITY_INDICES.filter((i) => state.properties[i]?.ownerSeat === seatIndex).length;
+  return UTILITY_INDICES.filter((i) => {
+    const p = state.properties[i];
+    return p?.ownerSeat === seatIndex && !p.mortgaged;
+  }).length;
 }
 
 export function countOwnedProperties(state, seatIndex) {
@@ -65,13 +74,13 @@ export function netWorth(state, seatIndex) {
     const space = BOARD[i];
     const prop = state.properties[i];
     if (prop.mortgaged) {
-      total = Math.round((total + (space.mortgageValue ?? 0)) * 100) / 100;
+      total = cents(total + (space.mortgageValue ?? 0));
     } else {
-      total = Math.round((total + inflatedPrice(state, space.price ?? 0)) * 100) / 100;
+      total = cents(total + inflatedPrice(state, space.price ?? 0));
     }
     if (prop.houses > 0 && space.houseCost) {
       const buildingValue = Math.round(inflatedPrice(state, space.houseCost) * prop.houses * 50) / 100;
-      total = Math.round((total + buildingValue) * 100) / 100;
+      total = cents(total + buildingValue);
     }
   }
   return total;

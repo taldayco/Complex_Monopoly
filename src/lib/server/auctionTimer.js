@@ -13,14 +13,16 @@
 // reducer signals that no further ticks are needed. Calls are fire-and-forget;
 // failures are logged but do not surface to clients.
 
+export const KIND_TO_ACTION = {
+  auction: 'auctionTick',
+  market: 'marketOpenTick'
+};
+
 let impl = null;
 
 export function setTimerImpl(t) {
   impl = t;
 }
-
-// Backward-compat alias so existing call sites keep working.
-export const setAuctionTimer = setTimerImpl;
 
 export function scheduleTimer(kind, roomCode, fireAtMs) {
   if (!impl) return Promise.resolve();
@@ -52,12 +54,3 @@ export function cancelTimer(kind) {
   return Promise.resolve();
 }
 
-// ---- Backward-compat wrappers for the auction-only call sites ----
-
-export function scheduleAuctionEnd(roomCode, endsAtMs) {
-  return scheduleTimer('auction', roomCode, endsAtMs);
-}
-
-export function cancelAuctionEnd() {
-  return cancelTimer('auction');
-}

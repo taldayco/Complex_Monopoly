@@ -1,3 +1,4 @@
+import { cents, round4 } from '../money.js';
 export const CREDIT_TIERS = [
   { name: 'Very Poor', min: 300, max: 349 },
   { name: 'Poor', min: 350, max: 579 },
@@ -79,7 +80,7 @@ export function sumOpenBankBalances(seat) {
     const a = accts[key];
     if (a?.open && typeof a.balance === 'number') sum += a.balance;
   }
-  return Math.round(sum * 100) / 100;
+  return cents(sum);
 }
 
 export function sumActiveLoanBalances(seat) {
@@ -90,7 +91,7 @@ export function sumActiveLoanBalances(seat) {
   for (const l of seat?.mortgageLoans ?? []) {
     if (l?.status === 'active' && typeof l.balance === 'number' && l.balance > 0) sum += l.balance;
   }
-  return Math.round(sum * 100) / 100;
+  return cents(sum);
 }
 
 export function calcMaxStandardLoan(seat, opts = {}) {
@@ -121,9 +122,9 @@ export function calcLoanOptions(score, principal, roll, opts = {}) {
   const tempRateDiscount = typeof opts.tempRateDiscount === 'number' ? opts.tempRateDiscount : 0;
   const options = LOAN_TERMS.map((term) => {
     const raw = baseRate + TERM_PREMIUM[term] + reserveRate - boardwalkDiscount - tempRateDiscount;
-    const ptr = Math.max(0, Math.round(raw * 10000) / 10000);
-    const totalDebt = Math.round(principal * (1 + ptr * term) * 100) / 100;
-    const installment = Math.round((totalDebt / term) * 100) / 100;
+    const ptr = Math.max(0, round4(raw));
+    const totalDebt = cents(principal * (1 + ptr * term));
+    const installment = cents(totalDebt / term);
     return { term, ptr, totalDebt, installment };
   });
   return { tier, options };

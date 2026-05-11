@@ -1,5 +1,6 @@
 import { BOARD, isOwnable } from '../shared/board.js';
 import { inflatedPrice } from '../shared/economy/inflation.js';
+import { cents } from '../shared/money.js';
 
 export function canBuy(state, seatIndex, spaceIndex) {
   const space = BOARD[spaceIndex];
@@ -17,10 +18,10 @@ export function buyProperty(state, seatIndex, spaceIndex) {
   if (!check.ok) return check;
   const seat = state.seats[seatIndex];
   const price = check.price;
-  seat.cash = Math.round((seat.cash - price) * 100) / 100;
+  seat.cash = cents(seat.cash - price);
   const t = transferOwnership(state, seatIndex, spaceIndex);
   if (!t.ok) {
-    seat.cash = Math.round((seat.cash + price) * 100) / 100;
+    seat.cash = cents(seat.cash + price);
     return t;
   }
   return { ok: true, price };

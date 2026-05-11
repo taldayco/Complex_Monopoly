@@ -1,7 +1,6 @@
 import { BANKS, BANK_IDS } from '../../shared/reserve/economyCatalog.js';
 import { CARD_CATALOG, getHysaRateFor } from '../../shared/reserve/cardCatalog.js';
-
-const ROUND_CENTS = (n) => Math.round(n * 100) / 100;
+import { cents } from '../../shared/money.js';
 
 const CARD_CATALOG_BANK_LABELS = {
   'MM Credit Union': 'mmcu',
@@ -45,9 +44,9 @@ export function deposit(seat, bank, amount) {
   const acct = seat.bankAccounts[bank];
   if (!acct.open) return { ok: false, error: 'NOT_OPEN' };
   if (seat.cash < amount) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
-  seat.cash = ROUND_CENTS(seat.cash - amount);
-  acct.balance = ROUND_CENTS(acct.balance + amount);
-  return { ok: true, amount: ROUND_CENTS(amount), cash: seat.cash, balance: acct.balance };
+  seat.cash = cents(seat.cash - amount);
+  acct.balance = cents(acct.balance + amount);
+  return { ok: true, amount: cents(amount), cash: seat.cash, balance: acct.balance };
 }
 
 export function withdraw(seat, bank, amount) {
@@ -59,9 +58,9 @@ export function withdraw(seat, bank, amount) {
   const cap = BANKS[bank].maxWithdrawal;
   if (amount > cap) return { ok: false, error: 'EXCEEDS_WITHDRAWAL_CAP', cap };
   if (acct.balance < amount) return { ok: false, error: 'INSUFFICIENT_BALANCE' };
-  acct.balance = ROUND_CENTS(acct.balance - amount);
-  seat.cash = ROUND_CENTS(seat.cash + amount);
-  return { ok: true, amount: ROUND_CENTS(amount), cash: seat.cash, balance: acct.balance };
+  acct.balance = cents(acct.balance - amount);
+  seat.cash = cents(seat.cash + amount);
+  return { ok: true, amount: cents(amount), cash: seat.cash, balance: acct.balance };
 }
 
 export function applyHysaInterestAtTurnStart(seat, reserveRate) {
@@ -77,9 +76,9 @@ export function applyHysaInterestAtTurnStart(seat, reserveRate) {
     const baseRate = (reserveRate ?? 0) + BANKS[id].hysaSpread;
     const rate = Math.max(0, baseRate + cardBonus);
     if (rate <= 0) continue;
-    const interest = ROUND_CENTS(balance * rate);
+    const interest = cents(balance * rate);
     if (interest <= 0) continue;
-    acct.balance = ROUND_CENTS(balance + interest);
+    acct.balance = cents(balance + interest);
     events.push({
       bank: id,
       bankName: BANKS[id].name,
@@ -110,7 +109,7 @@ export function applyFdicDisaster(seats) {
       const balance = acct.balance ?? 0;
       const cap = BANKS[id].fdicCap;
       if (balance > cap) {
-        const lost = ROUND_CENTS(balance - cap);
+        const lost = cents(balance - cap);
         acct.balance = cap;
         losses.push({
           seat: seat.seat,

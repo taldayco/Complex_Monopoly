@@ -1,15 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import { calcLoanOptions } from '../../shared/reserve/loanCatalog.js';
 import { BANKS } from '../../shared/reserve/economyCatalog.js';
-
-function step(state, action, ctx) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error + ' on ' + action.type);
-  return { state: r.state, events: r.events };
-}
 
 
 test('calcLoanOptions adds reserveRate on top of base PTR', () => {
@@ -96,8 +90,8 @@ test('accepted loan PTR is frozen at issue and survives later reserveRate change
   let s = makeRoom(2);
   s.seats[0].creditScore = 800;
   s.economy.reserveRate = 0.05;
-  let { state } = step(s, { type: 'requestLoan', seat: 0, amount: 500, bank: 'mmcu' }, { rng: makeRng(2) });
-  ({ state } = step(state, { type: 'respondLoanOffer', seat: 0, term: 3 }, { rng: makeRng(3) }));
+  let state = step(s, { type: 'requestLoan', seat: 0, amount: 500, bank: 'mmcu' }, { rng: makeRng(2) });
+  state = step(state, { type: 'respondLoanOffer', seat: 0, term: 3 }, { rng: makeRng(3) });
   const loanPtrAtIssue = state.seats[0].loans[0].ptr;
   state.economy.reserveRate = 0.1;
   assert.equal(state.seats[0].loans[0].ptr, loanPtrAtIssue);

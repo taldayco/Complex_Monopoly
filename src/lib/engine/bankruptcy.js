@@ -4,6 +4,7 @@ import { BANKRUPTCY_FLOOR } from '../shared/reserve/loanCatalog.js';
 import { VOLATILE_STOCK_ORDER, FP500_SYMBOL } from '../shared/reserve/stockCatalog.js';
 import { sellShares } from './reserve/stocks.js';
 import { inflatedPrice } from '../shared/economy/inflation.js';
+import { cents } from '../shared/money.js';
 
 // When a player declares bankruptcy:
 //   - If owed to another player: transfer all assets (cash, properties incl. mortgaged, jail-free cards).
@@ -19,7 +20,7 @@ export function liquidateBuildings(state, seatIndex) {
     const prop = state.properties[idx];
     if (prop.houses > 0 && space.houseCost) {
       const refund = Math.round(inflatedPrice(state, space.houseCost) * prop.houses * 50) / 100;
-      totalRefund = Math.round((totalRefund + refund) * 100) / 100;
+      totalRefund = cents(totalRefund + refund);
       if (prop.houses === 5) {
         state.bank.hotelsAvailable += 1;
       } else {
@@ -28,7 +29,7 @@ export function liquidateBuildings(state, seatIndex) {
       prop.houses = 0;
     }
   }
-  state.seats[seatIndex].cash = Math.round((state.seats[seatIndex].cash + totalRefund) * 100) / 100;
+  state.seats[seatIndex].cash = cents(state.seats[seatIndex].cash + totalRefund);
   return totalRefund;
 }
 
@@ -37,13 +38,24 @@ export function transferToCreditor(state, debtorSeat, creditorSeat) {
   const debtor = state.seats[debtorSeat];
   const creditor = state.seats[creditorSeat];
 
-  creditor.cash = Math.round((creditor.cash + debtor.cash) * 100) / 100;
+  creditor.cash = cents(creditor.cash + debtor.cash);
   debtor.cash = 0;
 
   for (const idx of ownedBy(state, debtorSeat)) {
-    state.properties[idx].ownerSeat = creditorSeat;
-    // Mortgaged status preserved; new owner pays 10% to unmortgage later.
+    const prop = state.properties[idx];
+    if (prop.mortgaged) {
+      prop.ownerSeat = null;
+      prop.mortgaged = false;
+      prop.houses = 0;
+    } else {
+      prop.ownerSeat = creditorSeat;
+    }
   }
+  // The debtor's debt obligations are wiped — the creditor inherits assets, not
+  // liabilities. Without this, standard loans / credit cards / non-property
+  // mortgage entries stayed `active` on the bankrupt seat, leaving phantom
+  // balances on the post-game state.
+  closeDebtorAccounts(debtor);
   if (debtor.getOutOfJailFreeChance) {
     creditor.getOutOfJailFreeChance = true;
     debtor.getOutOfJailFreeChance = false;
@@ -53,6 +65,41 @@ export function transferToCreditor(state, debtorSeat, creditorSeat) {
     debtor.getOutOfJailFreeCommunity = false;
   }
   debtor.bankrupt = true;
+  clearPendingsForSeat(state, debtorSeat);
+  checkGameOver(state);
+}
+
+// Wipe every kind of liability the bankrupt debtor leaves behind. Mortgage
+// loans backed by surrendered properties are tagged 'forfeited' (audit trail);
+// everything else simply closes / cancels with a zero balance.
+function closeDebtorAccounts(debtor) {
+  if (Array.isArray(debtor.mortgageLoans)) {
+    for (const l of debtor.mortgageLoans) {
+      if (l?.status === 'active') l.status = 'forfeited';
+    }
+  }
+  if (Array.isArray(debtor.loans)) {
+    for (const l of debtor.loans) {
+      if (l?.status !== 'active') continue;
+      if (l.source === 'mortgage') {
+        l.status = 'forfeited';
+      } else {
+        l.status = 'closed';
+      }
+      l.balance = 0;
+      l.dueThisTurn = false;
+    }
+  }
+  if (Array.isArray(debtor.creditCards)) {
+    for (const c of debtor.creditCards) {
+      if (c?.status === 'active') {
+        c.status = 'cancelled';
+        c.balance = 0;
+        c.cancelledAt = Date.now();
+        c.cancelReason = 'bankruptcy';
+      }
+    }
+  }
 }
 
 export function returnToBank(state, debtorSeat) {
@@ -118,7 +165,7 @@ function totalDebt(seat) {
   for (const c of seat.creditCards ?? []) {
     if (c?.status === 'active' && typeof c.balance === 'number') debt += c.balance;
   }
-  return Math.round(debt * 100) / 100;
+  return cents(debt);
 }
 
 function liquidateStocks(state, seatIndex, debtRemaining) {
@@ -147,7 +194,7 @@ function liquidateUndevelopedProperties(state, seatIndex, debtRemaining) {
     const refund = space.mortgageValue ?? 0;
     prop.ownerSeat = null;
     prop.mortgaged = false;
-    seat.cash = Math.round((seat.cash + refund) * 100) / 100;
+    seat.cash = cents(seat.cash + refund);
     proceeds += refund;
   }
   return proceeds;
@@ -160,7 +207,7 @@ function liquidateAllBuildingsForSeat(state, seatIndex) {
     const prop = state.properties[idx];
     if (prop.houses > 0 && space.houseCost) {
       const refund = Math.round(inflatedPrice(state, space.houseCost) * prop.houses * 50) / 100;
-      proceeds = Math.round((proceeds + refund) * 100) / 100;
+      proceeds = cents(proceeds + refund);
       if (prop.houses === 5) {
         state.bank.hotelsAvailable += 1;
       } else {
@@ -169,7 +216,7 @@ function liquidateAllBuildingsForSeat(state, seatIndex) {
       prop.houses = 0;
     }
   }
-  state.seats[seatIndex].cash = Math.round((state.seats[seatIndex].cash + proceeds) * 100) / 100;
+  state.seats[seatIndex].cash = cents(state.seats[seatIndex].cash + proceeds);
   return proceeds;
 }
 

@@ -1,8 +1,10 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { fmtPrice as fmt, fmtPctDelta as fmtPct, pctClass } from '$lib/client/format.js';
+  import { actions } from '$lib/client/actions.js';
   import { STOCK_ORDER, STOCK_CATALOG } from '$lib/shared/reserve/stockCatalog.js';
   import { CARD_CATALOG } from '$lib/shared/reserve/cardCatalog.js';
   import StockChart from './StockChart.svelte';
+  import { cents } from '$lib/shared/money.js';
 
   let { state: gs, mySeat } = $props();
 
@@ -17,18 +19,18 @@
   const selectedMarket = $derived(market[selectedSymbol]);
   const selectedHistory = $derived(selectedMarket?.history ?? []);
   const selectedPrice = $derived(selectedMarket?.price ?? 0);
-  const cost = $derived(Math.round(selectedPrice * qty * 100) / 100);
+  const cost = $derived(cents(selectedPrice * qty));
   const owned = $derived(lots[selectedSymbol] ?? 0);
   const canBuy = $derived(me && me.cash >= cost && qty > 0);
   const canSell = $derived(owned >= qty && qty > 0);
 
   function buy() {
     if (!canBuy) return;
-    send({ type: 'buyStock', symbol: selectedSymbol, qty });
+    actions.buyStock({symbol: selectedSymbol, qty});
   }
   function sell() {
     if (!canSell) return;
-    send({ type: 'sellStock', symbol: selectedSymbol, qty });
+    actions.sellStock({symbol: selectedSymbol, qty});
   }
 
   // Active credit cards with enough headroom to charge `cost`. Selecting one
@@ -50,13 +52,9 @@
   const canBuyWithCard = $derived(qty > 0 && selectedCard?.fits === true);
   function buyWithCard() {
     if (!canBuyWithCard) return;
-    send({ type: 'buyStockWithCard', symbol: selectedSymbol, qty, instanceId: selectedCardId });
+    actions.buyStockWithCard({symbol: selectedSymbol, qty, instanceId: selectedCardId});
   }
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
 
   function pctBetween(from, to) {
     if (typeof from !== 'number' || typeof to !== 'number' || from === 0) return null;
@@ -78,21 +76,12 @@
     if (!Array.isArray(h) || h.length < 2) return null;
     return pctBetween(h[0], h[h.length - 1]);
   }
-  function fmtPct(p) {
-    if (p == null) return '—';
-    return (p > 0 ? '+' : '') + p.toFixed(1) + '%';
-  }
-  function pctClass(p) {
-    if (p == null || p === 0) return '';
-    return p > 0 ? 'up' : 'down';
-  }
-
   function pl(sym) {
     const own = lots[sym] ?? 0;
     if (!own) return null;
     const cur = (market[sym]?.price ?? 0) * own;
     const b = basis[sym] ?? 0;
-    return Math.round((cur - b) * 100) / 100;
+    return cents(cur - b);
   }
 
   const lastFlipPctSel = $derived(lastFlipPctOf(selectedMarket));

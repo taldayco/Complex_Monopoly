@@ -10,7 +10,7 @@ import {
   setSeatConnection
 } from './roomManager.js';
 import { C2S, S2C } from '../shared/messageTypes.js';
-import { scheduleAuctionEnd, cancelAuctionEnd, scheduleTimer, cancelTimer } from './auctionTimer.js';
+import { scheduleTimer, cancelTimer } from './auctionTimer.js';
 
 // State for each connected socket: { roomCode, playerToken, seatIndex }
 const socketState = new WeakMap();
@@ -209,8 +209,8 @@ async function processEventsForTimers(roomCode, events) {
     }
   }
   const writes = [];
-  if (auctionFinal === null) writes.push(cancelAuctionEnd());
-  else if (typeof auctionFinal === 'number') writes.push(scheduleAuctionEnd(roomCode, auctionFinal));
+  if (auctionFinal === null) writes.push(cancelTimer('auction'));
+  else if (typeof auctionFinal === 'number') writes.push(scheduleTimer('auction', roomCode, auctionFinal));
   if (marketFinal === null) writes.push(cancelTimer('market'));
   else if (typeof marketFinal === 'number') writes.push(scheduleTimer('market', roomCode, marketFinal));
   await Promise.all(writes);
@@ -275,11 +275,21 @@ function sendError(socket, code, message) {
   }
 }
 
-// Strip per-seat secret playerToken from the broadcasted state. Each client
-// receives only non-secret fields; their own token came in their welcome
-// message. `viewerSeat` is the recipient's seat index — fields that are
-// private to a seat (e.g. revealedWildcards from insider-tip chance cards) are
-// only included on the matching seat and redacted from everyone else's view.
+// Build the per-recipient view of the room. Strips secrets (player tokens,
+// rngSeed/cursor, the unrevealed deck contents) and replaces opaque
+// state-machine slices with the summary the UI actually renders.
+//
+// Seat fields are passed through wholesale via `{ playerToken, ...rest }` —
+// any new field on `newSeat()` ships to clients automatically; only fields
+// listed in SEAT_PRIVATE / SEAT_PER_VIEWER below need maintenance.
+
+const SEAT_PRIVATE_FIELDS = ['playerToken'];
+// Fields that depend on the recipient: { fieldName: (seat, viewerSeat) => value }.
+const SEAT_PER_VIEWER_FIELDS = {
+  // Insider-tip reveals are a private hint to the seat that drew the card.
+  revealedWildcards: (s, viewerSeat) => (s.seat === viewerSeat ? (s.revealedWildcards ?? {}) : {})
+};
+
 function scrubState(room, viewerSeat) {
   const hostSeat = room.seats.find((s) => s.playerToken === room.hostPlayerToken)?.seat ?? null;
   const { hostPlayerToken, rngSeed, rngCursor, reserveDecks, stocks, marketOpen, economy, ...rest } = room;
@@ -291,58 +301,27 @@ function scrubState(room, viewerSeat) {
     marketOpen: scrubMarketOpen(marketOpen),
     reserveDecks: reserveDecks
       ? {
-          community: {
-            deckSize: reserveDecks.community?.deck?.length ?? 0,
-            discardSize: reserveDecks.community?.discard?.length ?? 0
-          },
-          chance: {
-            deckSize: reserveDecks.chance?.deck?.length ?? 0,
-            discardSize: reserveDecks.chance?.discard?.length ?? 0
-          }
+          community: deckSummary(reserveDecks.community),
+          chance: deckSummary(reserveDecks.chance)
         }
       : null,
-    seats: room.seats.map((s) => {
-      const isSelf = s.seat === viewerSeat;
-      return {
-        seat: s.seat,
-        name: s.name,
-        tokenPiece: s.tokenPiece,
-        connected: s.connected,
-        disconnectedAt: s.disconnectedAt,
-        cash: s.cash,
-        position: s.position,
-        inJail: s.inJail,
-        jailTurns: s.jailTurns,
-        getOutOfJailFreeChance: s.getOutOfJailFreeChance,
-        getOutOfJailFreeCommunity: s.getOutOfJailFreeCommunity,
-        bankrupt: s.bankrupt,
-        // Reserve fields — non-secret, all players see all players' finance state
-        baseScore: s.baseScore,
-        creditScore: s.creditScore,
-        loans: s.loans,
-        mortgageLoans: s.mortgageLoans ?? [],
-        standardLoansThisTurn: s.standardLoansThisTurn ?? 0,
-        creditCards: s.creditCards,
-        stockLots: s.stockLots,
-        stockCostBasis: s.stockCostBasis,
-        transactions: s.transactions,
-        eventInventory: s.eventInventory,
-        tempEffects: s.tempEffects,
-        loanTurnResponded: s.loanTurnResponded,
-        mortgageTurnResponded: s.mortgageTurnResponded ?? true,
-        nextDevModifier: s.nextDevModifier ?? null,
-        nextPermitFeeModifier: s.nextPermitFeeModifier ?? null,
-        pendingLoanOffer: s.pendingLoanOffer ?? null,
-        bankAccounts: s.bankAccounts ?? null,
-        // Private to the owning seat: revealed wildcard values from insider tips.
-        revealedWildcards: isSelf ? (s.revealedWildcards ?? {}) : {}
-      };
-    }),
-    chance: { deckSize: room.chance.deck.length, discardSize: room.chance.discard.length },
-    communityChest: {
-      deckSize: room.communityChest.deck.length,
-      discardSize: room.communityChest.discard.length
-    }
+    seats: room.seats.map((s) => scrubSeat(s, viewerSeat)),
+    chance: deckSummary(room.chance),
+    communityChest: deckSummary(room.communityChest)
+  };
+}
+
+function scrubSeat(seat, viewerSeat) {
+  const out = { ...seat };
+  for (const k of SEAT_PRIVATE_FIELDS) delete out[k];
+  for (const [k, fn] of Object.entries(SEAT_PER_VIEWER_FIELDS)) out[k] = fn(seat, viewerSeat);
+  return out;
+}
+
+function deckSummary(deck) {
+  return {
+    deckSize: deck?.deck?.length ?? 0,
+    discardSize: deck?.discard?.length ?? 0
   };
 }
 
@@ -364,37 +343,26 @@ function scrubStocks(stocks) {
   const market = {};
   if (stocks.market && typeof stocks.market === 'object') {
     for (const [sym, m] of Object.entries(stocks.market)) {
-      const deck = Array.isArray(m?.deck) ? m.deck : [];
-      let wildsRemaining = 0;
-      for (const c of deck) if (c && c.wild) wildsRemaining += 1;
-      const { deck: _, ...rest } = m ?? {};
+      const { deck, ...rest } = m ?? {};
+      const deckArr = Array.isArray(deck) ? deck : [];
       market[sym] = {
         ...rest,
-        deckSize: deck.length,
-        wildsRemaining
+        deckSize: deckArr.length,
+        wildsRemaining: deckArr.reduce((n, c) => n + (c?.wild ? 1 : 0), 0)
       };
     }
   }
-  return {
-    round: stocks.round ?? 0,
-    lastFlip: stocks.lastFlip ?? null,
-    market
-  };
+  return { ...stocks, market };
 }
 
 function scrubEconomy(econ) {
   if (!econ || typeof econ !== 'object') return econ ?? null;
-  const deck = Array.isArray(econ.deck) ? econ.deck : [];
-  let wildsRemaining = 0;
-  for (const c of deck) if (c && c.wild) wildsRemaining += 1;
+  const { deck, wildPool, tempEffects, ...rest } = econ;
+  const deckArr = Array.isArray(deck) ? deck : [];
   return {
-    reserveRate: econ.reserveRate ?? 0,
-    inflationFactor: econ.inflationFactor ?? 1,
-    deckSize: deck.length,
-    wildsRemaining,
-    history: Array.isArray(econ.history) ? econ.history : [],
-    lastFlip: econ.lastFlip ?? null,
-    round: econ.round ?? 0
+    ...rest,
+    deckSize: deckArr.length,
+    wildsRemaining: deckArr.reduce((n, c) => n + (c?.wild ? 1 : 0), 0)
   };
 }
 

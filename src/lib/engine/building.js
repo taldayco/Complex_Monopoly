@@ -2,16 +2,17 @@ import { BOARD } from '../shared/board.js';
 import { COLOR_GROUPS } from '../shared/constants.js';
 import { getDevelopmentRebateFor } from '../shared/reserve/cardCatalog.js';
 import { inflatedPrice } from '../shared/economy/inflation.js';
+import { cents } from '../shared/money.js';
 
 function effectiveDevelopmentCost(state, seat, listedCost) {
   const inflated = inflatedPrice(state, listedCost);
   const rebate = getDevelopmentRebateFor(seat);
   let cost = rebate > 0
-    ? Math.round(inflated * (1 - rebate) * 100) / 100
+    ? cents(inflated * (1 - rebate))
     : inflated;
   const mod = seat?.nextDevModifier;
-  if (mod && !mod.consumed && typeof mod.amount === 'number') {
-    cost = Math.round(cost * (1 + mod.amount) * 100) / 100;
+  if (mod && typeof mod.amount === 'number') {
+    cost = cents(cost * (1 + mod.amount));
     if (cost < 0) cost = 0;
   }
   return cost;
@@ -21,10 +22,10 @@ export function calcPermitFees(state, seatIndex, spaceIndex, devSubtotal) {
   const space = BOARD[spaceIndex];
   if (!space || space.type !== 'property') return { feesByRecipient: new Map(), totalFees: 0 };
   const seat = state.seats?.[seatIndex];
-  let feePerProperty = Math.round(devSubtotal * 0.25 * 100) / 100;
+  let feePerProperty = cents(devSubtotal * 0.25);
   const mod = seat?.nextPermitFeeModifier;
-  if (mod && !mod.consumed && typeof mod.amount === 'number') {
-    feePerProperty = Math.round(feePerProperty * (1 + mod.amount) * 100) / 100;
+  if (mod && typeof mod.amount === 'number') {
+    feePerProperty = cents(feePerProperty * (1 + mod.amount));
     if (feePerProperty < 0) feePerProperty = 0;
   }
   const feesByRecipient = new Map();
@@ -34,8 +35,8 @@ export function calcPermitFees(state, seatIndex, spaceIndex, devSubtotal) {
     const owner = state.properties[i]?.ownerSeat;
     if (owner == null || owner === seatIndex) continue;
     const cur = feesByRecipient.get(owner) ?? 0;
-    feesByRecipient.set(owner, Math.round((cur + feePerProperty) * 100) / 100);
-    totalFees = Math.round((totalFees + feePerProperty) * 100) / 100;
+    feesByRecipient.set(owner, cents(cur + feePerProperty));
+    totalFees = cents(totalFees + feePerProperty);
   }
   return { feesByRecipient, totalFees, feePerProperty };
 }
@@ -89,8 +90,8 @@ export function buyHouse(state, seatIndex, spaceIndex) {
   for (const [recipientSeat, amount] of check.feesByRecipient.entries()) {
     const recipient = state.seats[recipientSeat];
     if (!recipient) continue;
-    seat.cash = Math.round((seat.cash - amount) * 100) / 100;
-    recipient.cash = Math.round((recipient.cash + amount) * 100) / 100;
+    seat.cash = cents(seat.cash - amount);
+    recipient.cash = cents(recipient.cash + amount);
   }
 
   if (target === 5) {
@@ -100,13 +101,9 @@ export function buyHouse(state, seatIndex, spaceIndex) {
     state.bank.housesAvailable -= 1;
   }
   prop.houses = target;
-  seat.cash = Math.round((seat.cash - check.cost) * 100) / 100;
-  if (seat.nextDevModifier && !seat.nextDevModifier.consumed) {
-    seat.nextDevModifier = null;
-  }
-  if (seat.nextPermitFeeModifier && !seat.nextPermitFeeModifier.consumed) {
-    seat.nextPermitFeeModifier = null;
-  }
+  seat.cash = cents(seat.cash - check.cost);
+  seat.nextDevModifier = null;
+  seat.nextPermitFeeModifier = null;
   return {
     ok: true,
     cost: check.cost,
@@ -156,6 +153,6 @@ export function sellHouse(state, seatIndex, spaceIndex) {
     state.bank.housesAvailable += 1;
     prop.houses -= 1;
   }
-  seat.cash = Math.round((seat.cash + refund) * 100) / 100;
+  seat.cash = cents(seat.cash + refund);
   return { ok: true, refund, houses: prop.houses };
 }

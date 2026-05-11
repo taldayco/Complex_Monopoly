@@ -1,5 +1,5 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { BOARD } from '$lib/shared/board.js';
   import { ui } from '$lib/client/stores.svelte.js';
 
@@ -42,7 +42,7 @@
       ui.showTrade = false;
       ui.tradeTarget = null;
     } else {
-      send({ type: 'respondTrade', accept: false });
+      actions.respondTrade({accept: false});
     }
   }
 
@@ -52,9 +52,7 @@
   }
 
   function propose() {
-    send({
-      type: 'proposeTrade',
-      toSeat: partnerSeat,
+    actions.proposeTrade({toSeat: partnerSeat,
       offer: {
         cash: safeCash(offerCash),
         properties: offerProps,
@@ -66,14 +64,13 @@
         properties: requestProps,
         jailFreeChance: requestJailC,
         jailFreeCommunity: requestJailCC
-      }
-    });
+      }});
     ui.showTrade = false;
     ui.tradeTarget = null;
   }
 
   function accept() {
-    send({ type: 'respondTrade', accept: true });
+    actions.respondTrade({accept: true});
   }
 
   // For respond mode, populate fields from incoming trade.

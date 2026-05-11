@@ -1,3 +1,4 @@
+import { round4 } from '../../shared/money.js';
 import {
   BASE_INF_INT_DECK,
   INF_INT_WILDCARD_POOL,
@@ -6,6 +7,7 @@ import {
   STARTING_INFLATION,
   ECONOMY_HISTORY_CAP
 } from '../../shared/reserve/economyCatalog.js';
+import { seededRng, shuffleInPlace } from '../../shared/rng/seeded.js';
 
 export function createEconomyState(rngSeed = 0) {
   const econ = {
@@ -69,14 +71,6 @@ export function expireEconomyTempEffects(econ, turnCount, rng) {
   return expired;
 }
 
-function shuffle(arr, rng) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
 function pickRandomWildcards(rng) {
   const n = INF_INT_WILDCARD_POOL.length;
   const a = INF_INT_WILDCARD_POOL[Math.floor(rng() * n)];
@@ -90,17 +84,12 @@ function buildDeckFor(rng) {
     ...BASE_INF_INT_DECK.map((c) => ({ inf: c.inf, int: c.int, wild: false })),
     ...wilds.map((c) => ({ inf: c.inf, int: c.int, wild: true }))
   ];
-  shuffle(cards, rng);
+  shuffleInPlace(cards, rng);
   return { deck: cards, wildPool: wilds };
 }
 
 function buildInitialDeckSeeded(econ, rngSeed) {
-  let s = ((rngSeed | 0) ^ (0x9e3779b1 * 17)) >>> 0;
-  const rand = () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 0x100000000;
-  };
-  const built = buildDeckFor(rand);
+  const built = buildDeckFor(seededRng(rngSeed, 17));
   econ.deck = built.deck;
   econ.wildPool = built.wildPool;
 }
@@ -173,8 +162,4 @@ export function flipEconomy(econ, rng, now = Date.now()) {
     reshuffled
   };
   return { card, intIgnored, reshuffled, reserveRate: econ.reserveRate, inflationFactor: econ.inflationFactor };
-}
-
-function round4(n) {
-  return Math.round(n * 10000) / 10000;
 }

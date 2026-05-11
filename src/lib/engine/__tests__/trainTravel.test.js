@@ -1,13 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng, giveProperty } from './helpers.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
+import { makeRoom, makeRng, giveProperty, step } from './helpers.js';
 
 function landSeatOnRailroad(s, seatIdx, railIdx) {
   s.seats[seatIdx].position = (railIdx + 40 - 2) % 40;

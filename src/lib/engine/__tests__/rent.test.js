@@ -50,6 +50,25 @@ test('rent: railroads scale with count owned', () => {
   assert.equal(computeRent(room, 5, 0), 200);
 });
 
+test('rent: mortgaged railroads do not count toward the rent multiplier', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 1, 5);
+  giveProperty(room, 1, 15);
+  giveProperty(room, 1, 25, { mortgaged: true });
+  giveProperty(room, 1, 35, { mortgaged: true });
+  // Two non-mortgaged railroads → tier 2 rent ($50), not tier 4 ($200).
+  assert.equal(computeRent(room, 5, 0), 50);
+});
+
+test('rent: mortgaged utility does not count toward the multiplier', () => {
+  const room = makeRoom(2);
+  giveProperty(room, 1, 12);
+  giveProperty(room, 1, 28, { mortgaged: true });
+  // Owner has 2 properties (incl. mortgaged), but only 1 non-mortgaged utility,
+  // so multiplier must be 10, not 15. Result: 2 properties × 10 = 20.
+  assert.equal(computeRent(room, 12, 7), 20);
+});
+
 test('rent: utility 1 owned = (props + devs) × 10', () => {
   const room = makeRoom(2);
   giveProperty(room, 1, 12);

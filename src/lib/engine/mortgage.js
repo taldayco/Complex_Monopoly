@@ -1,11 +1,15 @@
 import { BOARD, isOwnable } from '../shared/board.js';
 import { COLOR_GROUPS } from '../shared/constants.js';
 import { inflatedPrice } from '../shared/economy/inflation.js';
+import { cents, round4 } from '../shared/money.js';
+import { getTierByScore } from '../shared/reserve/loanCatalog.js';
 import {
-  clampCreditScore,
-  getTierByScore,
-  STANDARD_LOAN_ANTI_HACK_BONUS
-} from '../shared/reserve/loanCatalog.js';
+  markDueIfActive,
+  applyCreditBonusOnFullPay,
+  recordInstallment,
+  payoffActiveLoan,
+  applySkipPenalty
+} from './_loanLifecycle.js';
 
 export const MORTGAGE_TIER_RATES = {
   Excellent:   { 5: 0.05, 10: 0.08 },
@@ -19,17 +23,14 @@ export const MORTGAGE_MAX_DOWN_PAYMENT = 0.75;
 export const MORTGAGE_PAYMENT_BONUS = 1;
 export const MORTGAGE_MISSED_PENALTY = 1;
 
-let MORTGAGE_LOAN_ID_COUNTER = 0;
-function genMortgageLoanId(seat) {
-  MORTGAGE_LOAN_ID_COUNTER += 1;
-  return `M-${seat.seat}-${(seat.mortgageLoans?.length ?? 0)}-${MORTGAGE_LOAN_ID_COUNTER}`;
-}
+import { newMortgageLoanId } from '../shared/ids.js';
+const genMortgageLoanId = newMortgageLoanId;
 
 export function downPaymentDiscount(pct) {
   if (typeof pct !== 'number' || !Number.isFinite(pct)) return 0;
-  if (pct < 0) return 0;
-  if (pct >= 0.5) return 0.02;
-  if (pct >= 0.25) return 0.01;
+  if (pct >= 0.5) return 0.03;
+  if (pct >= 0.25) return 0.02;
+  if (pct > 0) return 0.01;
   return 0;
 }
 
@@ -67,12 +68,12 @@ export function calcMortgageOffer(seat, propertyIndex, term, downPaymentPct, sta
   const baseRate = MORTGAGE_TIER_RATES[tier.name][term];
   const reserveRate = typeof opts.reserveRate === 'number' ? opts.reserveRate : 0;
   const dpDiscount = downPaymentDiscount(downPaymentPct);
-  const ptr = Math.max(0, Math.round((baseRate + reserveRate - dpDiscount) * 10000) / 10000);
-  const downPaymentAmount = Math.round(space.mortgageValue * downPaymentPct * 100) / 100;
+  const ptr = Math.max(0, round4(baseRate + reserveRate - dpDiscount));
+  const downPaymentAmount = cents(space.mortgageValue * downPaymentPct);
   if ((seat?.cash ?? 0) < downPaymentAmount) return { error: 'INSUFFICIENT_FUNDS_FOR_DOWN_PAYMENT' };
-  const principal = Math.round(space.mortgageValue * (1 - downPaymentPct) * 100) / 100;
-  const totalDebt = Math.round(principal * (1 + ptr * term) * 100) / 100;
-  const installment = Math.round((totalDebt / term) * 100) / 100;
+  const principal = cents(space.mortgageValue * (1 - downPaymentPct));
+  const totalDebt = cents(principal * (1 + ptr * term));
+  const installment = cents(totalDebt / term);
   return {
     ok: true,
     tier: tier.name,
@@ -115,7 +116,7 @@ export function requestMortgageLoan(state, seatIndex, propertyIndex, term, downP
     creditCreditedThisTurn: false
   };
   seat.mortgageLoans.push(loan);
-  seat.cash = Math.round((seat.cash + offer.principal - offer.downPaymentAmount) * 100) / 100;
+  seat.cash = cents(seat.cash + offer.principal - offer.downPaymentAmount);
   state.properties[propertyIndex].mortgaged = true;
   return { ok: true, loan };
 }
@@ -128,17 +129,9 @@ export function payMortgageInstallment(state, seatIndex, loanId) {
   if (!loan.dueThisTurn) return { error: 'NOT_DUE' };
   const due = Math.min(loan.installment, loan.balance);
   if (seat.cash < due) return { error: 'INSUFFICIENT_FUNDS' };
-  if (!loan.creditCreditedThisTurn && Math.abs(due - loan.installment) <= 0.01) {
-    seat.creditScore = clampCreditScore((seat.creditScore ?? 720) + MORTGAGE_PAYMENT_BONUS);
-    loan.creditCreditedThisTurn = true;
-  }
-  seat.cash = Math.round((seat.cash - due) * 100) / 100;
-  loan.balance = Math.round((loan.balance - due) * 100) / 100;
-  loan.paymentsMade += 1;
-  loan.dueThisTurn = false;
-  if (loan.paymentsMade >= loan.term || loan.balance <= 0.0001) {
-    loan.balance = 0;
-    loan.status = 'closed';
+  applyCreditBonusOnFullPay(seat, loan, due, MORTGAGE_PAYMENT_BONUS);
+  seat.cash = cents(seat.cash - due);
+  if (recordInstallment(loan, due)) {
     state.properties[loan.propertyIndex].mortgaged = false;
   }
   refreshMortgageTurnResponded(seat);
@@ -151,8 +144,7 @@ export function skipMortgageInstallment(state, seatIndex, loanId) {
   const loan = findActiveMortgageLoan(seat, loanId);
   if (!loan) return { error: 'NO_LOAN' };
   if (!loan.dueThisTurn) return { error: 'NOT_DUE' };
-  loan.dueThisTurn = false;
-  seat.creditScore = clampCreditScore((seat.creditScore ?? 720) - MORTGAGE_MISSED_PENALTY);
+  applySkipPenalty(seat, loan, MORTGAGE_MISSED_PENALTY);
   refreshMortgageTurnResponded(seat);
   return { ok: true, loan };
 }
@@ -162,16 +154,11 @@ export function payoffMortgageLoan(state, seatIndex, loanId) {
   if (!seat) return { error: 'NO_SEAT' };
   const loan = findActiveMortgageLoan(seat, loanId);
   if (!loan) return { error: 'NO_LOAN' };
-  if (seat.cash < loan.balance) return { error: 'INSUFFICIENT_FUNDS' };
-  const paid = loan.balance;
-  seat.cash = Math.round((seat.cash - paid) * 100) / 100;
-  loan.balance = 0;
-  loan.paymentsMade = loan.term;
-  loan.dueThisTurn = false;
-  loan.status = 'closed';
+  const r = payoffActiveLoan(seat, loan);
+  if (!r.ok) return { error: r.error };
   state.properties[loan.propertyIndex].mortgaged = false;
   refreshMortgageTurnResponded(seat);
-  return { ok: true, paid, loan };
+  return { ok: true, paid: r.paid, loan };
 }
 
 export function markMortgageLoansDueAtTurnStart(seat) {
@@ -182,11 +169,7 @@ export function markMortgageLoansDueAtTurnStart(seat) {
   }
   let anyDue = false;
   for (const loan of seat.mortgageLoans) {
-    if (loan.status === 'active' && loan.balance > 0.0001 && loan.paymentsMade < loan.term) {
-      loan.dueThisTurn = true;
-      loan.creditCreditedThisTurn = false;
-      anyDue = true;
-    }
+    if (markDueIfActive(loan)) anyDue = true;
   }
   seat.mortgageTurnResponded = !anyDue;
   return anyDue;
@@ -217,6 +200,6 @@ export function sellPropertyToBank(state, seatIndex, spaceIndex) {
   prop.ownerSeat = null;
   prop.mortgaged = false;
   prop.houses = 0;
-  seat.cash = Math.round((seat.cash + payout) * 100) / 100;
+  seat.cash = cents(seat.cash + payout);
   return { ok: true, payout };
 }

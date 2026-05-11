@@ -11,12 +11,9 @@ import {
 } from '../../shared/reserve/cardCatalog.js';
 import { clampCreditScore } from '../../shared/reserve/loanCatalog.js';
 import { hasTempEffect } from './eventCards.js';
+import { cents } from '../../shared/money.js';
 
-let CARD_ID_COUNTER = 0;
-function genInstanceId(seat, cardId) {
-  CARD_ID_COUNTER += 1;
-  return `CC-${seat.seat}-${cardId}-${CARD_ID_COUNTER}`;
-}
+import { newCreditCardId as genInstanceId } from '../../shared/ids.js';
 
 export function applyForCard(seat, cardId, turnCount = 0, now = Date.now()) {
   const card = getCard(cardId);
@@ -41,7 +38,7 @@ export function applyForCard(seat, cardId, turnCount = 0, now = Date.now()) {
   }
   if (seat.cash < card.signingFee) return { error: 'INSUFFICIENT_FUNDS' };
 
-  seat.cash = Math.round((seat.cash - card.signingFee + (card.signupBonus ?? 0)) * 100) / 100;
+  seat.cash = cents(seat.cash - card.signingFee + (card.signupBonus ?? 0));
   const creditLine = calcCreditLine(seat, cardId);
   const instance = {
     id: genInstanceId(seat, cardId),
@@ -80,7 +77,7 @@ export function cancelCard(seat, instanceId) {
   if (!card) return { error: 'UNKNOWN_CARD' };
   if ((inst.balance ?? 0) > 0) return { error: 'OUTSTANDING_BALANCE' };
   if (seat.cash < card.cancelFee) return { error: 'INSUFFICIENT_FUNDS' };
-  seat.cash = Math.round((seat.cash - card.cancelFee) * 100) / 100;
+  seat.cash = cents(seat.cash - card.cancelFee);
   inst.status = 'cancelled';
   inst.cancelledAt = Date.now();
   return { ok: true, cancelFee: card.cancelFee };
@@ -98,10 +95,10 @@ export function applyTurnStartCardFees(seat) {
     if (baseFee <= 0) continue;
     const fee = halfFees ? Math.round(baseFee * 50) / 100 : baseFee;
     if (seat.cash >= fee) {
-      seat.cash = Math.round((seat.cash - fee) * 100) / 100;
+      seat.cash = cents(seat.cash - fee);
       events.push({ cardId: inst.cardId, fee, action: 'charged' });
     } else if ((inst.balance ?? 0) > 0) {
-      inst.balance = Math.round(((inst.balance ?? 0) + fee) * 100) / 100;
+      inst.balance = cents((inst.balance ?? 0) + fee);
       const penalty = getMissedPaymentPenaltyForCard(inst.cardId);
       seat.creditScore = clampCreditScore((seat.creditScore ?? 720) - penalty);
       events.push({ cardId: inst.cardId, fee, action: 'addedToBalance', penalty, balance: inst.balance });
@@ -130,7 +127,7 @@ export function chargeCard(seat, instanceId, amount) {
   if (cur + amount > limit) {
     return { ok: false, error: 'INSUFFICIENT_CREDIT', limit, available: Math.max(0, limit - cur) };
   }
-  inst.balance = Math.round((cur + amount) * 100) / 100;
+  inst.balance = cents(cur + amount);
   return { ok: true, charged: amount, balance: inst.balance, limit };
 }
 
@@ -142,9 +139,8 @@ export function payCardBalance(seat, instanceId, amount) {
   if (cur <= 0) return { ok: false, error: 'NO_BALANCE' };
   const pay = Math.min(amount, cur);
   if (seat.cash < pay) return { ok: false, error: 'INSUFFICIENT_FUNDS' };
-  seat.cash = Math.round((seat.cash - pay) * 100) / 100;
-  inst.balance = Math.round((cur - pay) * 100) / 100;
-  if (inst.paidThisCycleTurn === undefined) inst.paidThisCycleTurn = null;
+  seat.cash = cents(seat.cash - pay);
+  inst.balance = cents(cur - pay);
   return { ok: true, paid: pay, balance: inst.balance };
 }
 
@@ -177,8 +173,8 @@ export function processCardCycle(seats, turnCount, reserveRate = 0) {
       let paid = 0;
       let missed = false;
       if (inst.autopay !== false && seat.cash >= dueAmount) {
-        seat.cash = Math.round((seat.cash - dueAmount) * 100) / 100;
-        inst.balance = Math.round((balanceBefore - dueAmount) * 100) / 100;
+        seat.cash = cents(seat.cash - dueAmount);
+        inst.balance = cents(balanceBefore - dueAmount);
         paid = dueAmount;
       } else {
         missed = true;
@@ -196,9 +192,9 @@ export function processCardCycle(seats, turnCount, reserveRate = 0) {
       const effectiveRate = Math.max(0, baseRate + rateBase);
       let interest = 0;
       if (effectiveRate > 0 && inst.balance > 0) {
-        interest = Math.round(inst.balance * effectiveRate * 100) / 100;
+        interest = cents(inst.balance * effectiveRate);
         if (interest > 0) {
-          inst.balance = Math.round((inst.balance + interest) * 100) / 100;
+          inst.balance = cents(inst.balance + interest);
         }
       }
       events.push({

@@ -1,5 +1,6 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { fmtCash as fmt } from '$lib/client/format.js';
+  import { actions } from '$lib/client/actions.js';
 
   let { state: gs, mySeat } = $props();
 
@@ -25,10 +26,6 @@
     }
   });
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  }
 
   function nameOf(seat) {
     return gs.seats.find((s) => s.seat === seat)?.name ?? `Seat ${seat}`;
@@ -37,13 +34,13 @@
   function submitRequest() {
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0 || toSeat == null) return;
-    send({ type: 'requestTransfer', toSeat, amount: amt, note });
+    actions.requestTransfer({toSeat, amount: amt, note});
     amount = 50;
     note = '';
   }
-  function approve(id) { send({ type: 'respondTransfer', requestId: id, approve: true }); }
-  function deny(id) { send({ type: 'respondTransfer', requestId: id, approve: false }); }
-  function cancel(id) { send({ type: 'cancelTransfer', requestId: id }); }
+  function approve(id) { actions.respondTransfer({requestId: id, approve: true}); }
+  function deny(id) { actions.respondTransfer({requestId: id, approve: false}); }
+  function cancel(id) { actions.cancelTransfer({requestId: id}); }
 
   const canRequest = $derived(toSeat != null && Number(amount) > 0);
 </script>

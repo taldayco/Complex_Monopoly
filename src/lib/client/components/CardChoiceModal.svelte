@@ -1,16 +1,10 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { fmtPrice as fmt, fmtRate as fmtPct } from '$lib/client/format.js';
+  import { actions } from '$lib/client/actions.js';
+  import { cents, round4 } from '$lib/shared/money.js';
 
   let { pending, state, me } = $props();
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  function fmtPct(p) {
-    if (typeof p !== 'number') return '—';
-    return (p * 100).toFixed(2) + '%';
-  }
 
   const isStockKind = $derived(
     pending.kind === 'stockUpgrade' || pending.kind === 'insiderTip'
@@ -25,7 +19,7 @@
     return (pending.options ?? []).map((sym) => {
       const price = market[sym]?.price ?? 0;
       const factor = 1 + (typeof pending.amount === 'number' ? pending.amount : 0);
-      const previewPrice = Math.max(0.01, Math.round(price * factor * 100) / 100);
+      const previewPrice = Math.max(0.01, cents(price * factor));
       return { sym, price, previewPrice };
     });
   });
@@ -38,13 +32,13 @@
   });
 
   function pickStock(symbol) {
-    send({ type: 'chooseStockTarget', symbol });
+    actions.chooseStockTarget({symbol});
   }
   function pickLoan(loanId) {
-    send({ type: 'chooseLoanTarget', loanId });
+    actions.chooseLoanTarget({loanId});
   }
   function skip() {
-    send({ type: 'skipCardChoice' });
+    actions.skipCardChoice();
   }
 
   const headerText = $derived.by(() => {
@@ -95,7 +89,7 @@
         <div class="options">
           {#each loanOptions as loan (loan.id)}
             {@const newPtr = pending.kind === 'rateDiscount'
-              ? Math.max(0, Math.round((loan.ptr + (pending.amount ?? 0)) * 10000) / 10000)
+              ? Math.max(0, round4(loan.ptr + (pending.amount ?? 0)))
               : null}
             <button class="opt loan-opt" onclick={() => pickLoan(loan.id)}>
               <div class="loan-head">

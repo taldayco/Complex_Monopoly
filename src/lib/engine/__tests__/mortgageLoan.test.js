@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng, giveProperty } from './helpers.js';
+import { makeRoom, makeRng, giveProperty, step } from './helpers.js';
 import {
   MORTGAGE_TIER_RATES,
   MORTGAGE_TERMS,
@@ -17,12 +17,6 @@ import {
 } from '../mortgage.js';
 import { BOARD } from '../../shared/board.js';
 
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
-
 test('MORTGAGE_TIER_RATES matches spec exactly for all tiers and terms', () => {
   assert.deepEqual(MORTGAGE_TIER_RATES.Excellent, { 5: 0.05, 10: 0.08 });
   assert.deepEqual(MORTGAGE_TIER_RATES['Very Good'], { 5: 0.08, 10: 0.10 });
@@ -35,14 +29,14 @@ test('MORTGAGE_TERMS = [5, 10] and max down payment = 0.75', () => {
   assert.equal(MORTGAGE_MAX_DOWN_PAYMENT, 0.75);
 });
 
-test('downPaymentDiscount: under 25% = 0%, 25-49% = -1%, 50-75% = -2%', () => {
+test('downPaymentDiscount: bigger down payment = bigger discount', () => {
   assert.equal(downPaymentDiscount(0), 0);
-  assert.equal(downPaymentDiscount(0.10), 0);
-  assert.equal(downPaymentDiscount(0.249), 0);
-  assert.equal(downPaymentDiscount(0.25), 0.01);
-  assert.equal(downPaymentDiscount(0.49), 0.01);
-  assert.equal(downPaymentDiscount(0.50), 0.02);
-  assert.equal(downPaymentDiscount(0.75), 0.02);
+  assert.equal(downPaymentDiscount(0.10), 0.01);
+  assert.equal(downPaymentDiscount(0.249), 0.01);
+  assert.equal(downPaymentDiscount(0.25), 0.02);
+  assert.equal(downPaymentDiscount(0.49), 0.02);
+  assert.equal(downPaymentDiscount(0.50), 0.03);
+  assert.equal(downPaymentDiscount(0.75), 0.03);
   assert.equal(downPaymentDiscount(-0.1), 0);
 });
 
@@ -91,22 +85,22 @@ test('mortgage offer for Good tier, term 5, no down: principal = mortgageValue, 
   assert.equal(offer.term, 5);
 });
 
-test('mortgage offer with 25% down: -1% rate; principal scaled by (1 - dp)', () => {
+test('mortgage offer with 25% down: -2% rate; principal scaled by (1 - dp)', () => {
   const room = makeRoom(2);
   giveProperty(room, 0, 39);
   room.seats[0].creditScore = 720;
   const space = BOARD[39];
   const offer = calcMortgageOffer(room.seats[0], 39, 5, 0.25, room);
-  assert.equal(offer.ptr, 0.09);
+  assert.equal(offer.ptr, 0.08);
   assert.equal(offer.principal, Math.round(space.mortgageValue * 0.75 * 100) / 100);
 });
 
-test('mortgage offer with 50% down: -2% rate', () => {
+test('mortgage offer with 50% down: -3% rate', () => {
   const room = makeRoom(2);
   giveProperty(room, 0, 39);
   room.seats[0].creditScore = 720;
   const offer = calcMortgageOffer(room.seats[0], 39, 5, 0.50, room);
-  assert.equal(offer.ptr, 0.08);
+  assert.equal(offer.ptr, 0.07);
 });
 
 test('mortgage offer with reserveRate added: rate floors at 0', () => {

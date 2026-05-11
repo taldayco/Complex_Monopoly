@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import {
   openAccount,
   closeAccount,
@@ -156,12 +156,6 @@ test('applyFdicDisaster: clamps every open account at the FDIC cap, leaves cash 
   assert.equal(r.losses.length, 2);
 });
 
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 test('reducer: full open → deposit → withdraw → close roundtrip', () => {
   let s = makeRoom(2);

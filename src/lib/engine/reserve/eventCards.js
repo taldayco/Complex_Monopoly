@@ -15,26 +15,16 @@ import { clampCreditScore } from '../../shared/reserve/loanCatalog.js';
 import { COLOR_GROUPS } from '../../shared/constants.js';
 import { BANKS } from '../../shared/reserve/economyCatalog.js';
 import { recalcFP500, buyShares, sellShares } from './stocks.js';
+import { cents } from '../../shared/money.js';
+import { seededRng, shuffleInPlace } from '../../shared/rng/seeded.js';
 
-let EFFECT_ID_COUNTER = 0;
+import { newTempEffectId } from '../../shared/ids.js';
 
 // ---------- DECK SETUP ----------
 
-// Deterministic Fisher-Yates shuffle (LCG-driven so we don't need to inject
-// the rng module here). Mirrors the style used for the existing chance/
-// community-chest decks in createGame.js.
+// Salt keeps the community / chance deck orders independent given the same seed.
 function shuffleIds(ids, seed, salt) {
-  const out = ids.slice();
-  let s = (seed ^ (salt * 0x9e3779b1)) >>> 0;
-  const rand = () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 0x100000000;
-  };
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
+  return shuffleInPlace(ids.slice(), seededRng(seed, salt));
 }
 
 export function createReserveDeckState(rngSeed) {
@@ -156,7 +146,7 @@ function applyEffect(state, seat, eff, ctx) {
 // ---------- EFFECT IMPLEMENTATIONS ----------
 
 function applyCash(seat, amount) {
-  seat.cash = Math.round((seat.cash + amount) * 100) / 100;
+  seat.cash = cents(seat.cash + amount);
   return { amount };
 }
 
@@ -171,8 +161,8 @@ function applyDividend(seat, stocks, symbol, pct) {
   const shares = seat.stockLots?.[symbol] ?? 0;
   if (shares <= 0) return { paid: 0, symbol, shares: 0 };
   const price = stocks.market[symbol].price ?? 0;
-  const paid = Math.round(shares * price * pct * 100) / 100;
-  seat.cash = Math.round((seat.cash + paid) * 100) / 100;
+  const paid = cents(shares * price * pct);
+  seat.cash = cents(seat.cash + paid);
   return { paid, symbol, shares, price, pct };
 }
 
@@ -181,7 +171,7 @@ function applyFlatDividend(seat, amount, requireAnyShares) {
     const owns = Object.values(seat.stockLots ?? {}).some((q) => q > 0);
     if (!owns) return { paid: 0, reason: 'NO_SHARES' };
   }
-  seat.cash = Math.round((seat.cash + amount) * 100) / 100;
+  seat.cash = cents(seat.cash + amount);
   return { paid: amount };
 }
 
@@ -208,7 +198,7 @@ function applyMarketShock(stocks, pct) {
     const m = stocks.market[sym];
     if (!m) continue;
     const before = m.price;
-    const next = Math.max(0.01, Math.round(m.price * (1 + pct / 100) * 100) / 100);
+    const next = Math.max(0.01, cents(m.price * (1 + pct / 100)));
     m.price = next;
     m.lastFlipPct = pct;
     m.lastCard = pct;
@@ -227,7 +217,7 @@ function applyStockShock(stocks, symbol, pct) {
   }
   const m = stocks.market[symbol];
   const before = m.price;
-  const next = Math.max(0.01, Math.round(m.price * (1 + pct / 100) * 100) / 100);
+  const next = Math.max(0.01, cents(m.price * (1 + pct / 100)));
   m.price = next;
   m.lastFlipPct = pct;
   m.lastCard = pct;
@@ -239,9 +229,8 @@ function applyStockShock(stocks, symbol, pct) {
 }
 
 function applyTempEffect(seat, eff) {
-  EFFECT_ID_COUNTER += 1;
   const entry = {
-    id: `TE-${seat.seat}-${EFFECT_ID_COUNTER}`,
+    id: newTempEffectId(seat),
     effectId: eff.effectId,
     expiresInTurns: eff.turns,
     payload: eff.payload ?? null
@@ -255,8 +244,8 @@ function applySpecialLoan(seat, eff) {
   const principal = eff.principal;
   const term = eff.term;
   const ptr = eff.ptr;
-  const totalDebt = Math.round(principal * (1 + ptr * term) * 100) / 100;
-  const installment = Math.round((totalDebt / term) * 100) / 100;
+  const totalDebt = cents(principal * (1 + ptr * term));
+  const installment = cents(totalDebt / term);
   const loan = {
     id: `SL-${seat.seat}-${seat.loans.length}-${Date.now()}`,
     principal,
@@ -272,7 +261,7 @@ function applySpecialLoan(seat, eff) {
     source: 'eventCard'
   };
   seat.loans.push(loan);
-  seat.cash = Math.round((seat.cash + principal) * 100) / 100;
+  seat.cash = cents(seat.cash + principal);
   return { principal, term, ptr, totalDebt, installment, loanId: loan.id };
 }
 
@@ -303,7 +292,7 @@ function applyBankPaysInstallment(seat) {
   const target = due ?? seat.loans.find((l) => l.status === 'active');
   if (!target) return { skipped: true, reason: 'NO_LOAN' };
   const amount = Math.min(target.installment, target.balance);
-  target.balance = Math.round((target.balance - amount) * 100) / 100;
+  target.balance = cents(target.balance - amount);
   target.paymentsMade += 1;
   if (target === due) target.dueThisTurn = false;
   if (target.paymentsMade >= target.term || target.balance <= 0.0001) {
@@ -317,7 +306,7 @@ function applyCashAllSeats(state, amount) {
   const recipients = [];
   for (const s of state.seats) {
     if (s.bankrupt) continue;
-    s.cash = Math.round((s.cash + amount) * 100) / 100;
+    s.cash = cents(s.cash + amount);
     recipients.push(s.seat);
   }
   return { amount, recipients };
@@ -338,13 +327,13 @@ function applyDividendAll(seat, stocks, pct) {
     const shares = seat.stockLots[sym] ?? 0;
     if (shares <= 0) continue;
     const price = stocks.market[sym]?.price ?? 0;
-    const paid = Math.round(shares * price * pct * 100) / 100;
+    const paid = cents(shares * price * pct);
     if (paid > 0) {
       total += paid;
       breakdown.push({ symbol: sym, shares, price, paid });
     }
   }
-  if (total > 0) seat.cash = Math.round((seat.cash + total) * 100) / 100;
+  if (total > 0) seat.cash = cents(seat.cash + total);
   return { paid: total, breakdown };
 }
 
@@ -375,8 +364,8 @@ function applyClassEnvy(state, amount) {
   const r = state.seats[richest];
   const p = state.seats[poorest];
   const transfer = Math.min(amount, r.cash);
-  r.cash = Math.round((r.cash - transfer) * 100) / 100;
-  p.cash = Math.round((p.cash + transfer) * 100) / 100;
+  r.cash = cents(r.cash - transfer);
+  p.cash = cents(p.cash + transfer);
   return { richest, poorest, transferred: transfer };
 }
 
@@ -395,7 +384,7 @@ function applyAntitrust(state, amount) {
     }
     if (!ownsFullGroup) continue;
     const debit = Math.min(amount, s.cash);
-    s.cash = Math.round((s.cash - debit) * 100) / 100;
+    s.cash = cents(s.cash - debit);
     debited.push({ seat: s.seat, amount: debit });
   }
   return { debited };
@@ -410,7 +399,7 @@ function applyBoardwalkScandal(state, amount) {
     const isExcellent = (s.creditScore ?? 0) >= 800;
     if (isExcellent) continue;
     const debit = Math.min(amount, s.cash);
-    s.cash = Math.round((s.cash - debit) * 100) / 100;
+    s.cash = cents(s.cash - debit);
     debited.push({ seat: s.seat, amount: debit });
   }
   return { debited };
@@ -430,13 +419,17 @@ function applyPredatoryLawsuit(state, creditDelta, cashAmount) {
   if (target == null || mostLoans <= 0) return { skipped: true };
   const seat = state.seats[target];
   seat.creditScore = clampCreditScore((seat.creditScore ?? 720) + creditDelta);
-  seat.cash = Math.round((seat.cash + cashAmount) * 100) / 100;
+  seat.cash = cents(seat.cash + cashAmount);
   return { recipient: target, creditDelta, cashAmount };
 }
 
 function applyRegionalBankFailure(state, ctx) {
-  const rng = ctx?.rng ?? Math.random;
-  const die = Math.floor(rng() * 6) + 1;
+  // Determinism: must use the seeded reducer rng. Falling back to Math.random
+  // (the prior behavior) silently broke replays for any room that drew this card.
+  if (typeof ctx?.rng !== 'function') {
+    return { skipped: true, reason: 'NO_RNG' };
+  }
+  const die = Math.floor(ctx.rng() * 6) + 1;
   const bank = die % 2 === 1 ? 'mmcu' : 'boardwalk';
   const cap = BANKS[bank].fdicCap;
   const losses = [];
@@ -445,7 +438,7 @@ function applyRegionalBankFailure(state, ctx) {
     const acct = s.bankAccounts?.[bank];
     if (!acct?.open) continue;
     if ((acct.balance ?? 0) > cap) {
-      const lost = Math.round((acct.balance - cap) * 100) / 100;
+      const lost = cents(acct.balance - cap);
       acct.balance = cap;
       losses.push({ seat: s.seat, lost });
     }
@@ -464,7 +457,7 @@ function applyMaintenanceBill(state, seat, perHouse, perHotel) {
     else owed += perHouse * h;
   }
   const debit = Math.min(owed, seat.cash);
-  seat.cash = Math.round((seat.cash - debit) * 100) / 100;
+  seat.cash = cents(seat.cash - debit);
   return { owed, debited: debit };
 }
 
@@ -476,17 +469,17 @@ function applyTaxAppeal(state, seat, perDevelopedProperty) {
     if ((prop.houses ?? 0) > 0) count += 1;
   }
   const credit = count * perDevelopedProperty;
-  seat.cash = Math.round((seat.cash + credit) * 100) / 100;
+  seat.cash = cents(seat.cash + credit);
   return { credited: credit, properties: count };
 }
 
 function applyDevModifier(seat, amount, oneHouseOnly) {
-  seat.nextDevModifier = { amount, oneHouseOnly: !!oneHouseOnly, consumed: false };
+  seat.nextDevModifier = { amount, oneHouseOnly: !!oneHouseOnly };
   return { amount, oneHouseOnly: !!oneHouseOnly };
 }
 
 function applyPermitFeeModifier(seat, amount) {
-  seat.nextPermitFeeModifier = { amount, consumed: false };
+  seat.nextPermitFeeModifier = { amount };
   return { amount };
 }
 
@@ -501,7 +494,7 @@ function applyWrongfullyAccused(seat) {
   if (seat.inJail) {
     seat.inJail = false;
     seat.jailTurns = 0;
-    seat.cash = Math.round((seat.cash + 200) * 100) / 100;
+    seat.cash = cents(seat.cash + 200);
     return { released: true, paid: 200 };
   }
   return applyGrantInventory(seat, 'wrongfullyAccused', 1);
@@ -566,7 +559,7 @@ function applyFinancialCrisis(state, inflationFreezeTurns = 10, interestFreezeTu
       if (!acct?.open) continue;
       const cap = BANKS[bank].fdicCap;
       if ((acct.balance ?? 0) > cap) {
-        const lost = Math.round((acct.balance - cap) * 100) / 100;
+        const lost = cents(acct.balance - cap);
         acct.balance = cap;
         losses.push({ seat: s.seat, bank, lost });
       }

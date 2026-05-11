@@ -34,13 +34,13 @@ test('cmty.taxAppealApproved: +$25 per developed property', () => {
 test('cmty.contractorDiscount: stamps nextDevModifier', () => {
   const s = makeRoom(2);
   applyEventCard(s, 0, 'community', 'cmty.contractorDiscount', { rng: makeRng() }, noop);
-  assert.deepEqual(s.seats[0].nextDevModifier, { amount: -0.25, oneHouseOnly: false, consumed: false });
+  assert.deepEqual(s.seats[0].nextDevModifier, { amount: -0.25, oneHouseOnly: false });
 });
 
 test('cmty.permitClerkLikesYou: stamps nextPermitFeeModifier', () => {
   const s = makeRoom(2);
   applyEventCard(s, 0, 'community', 'cmty.permitClerkLikesYou', { rng: makeRng() }, noop);
-  assert.deepEqual(s.seats[0].nextPermitFeeModifier, { amount: -0.5, consumed: false });
+  assert.deepEqual(s.seats[0].nextPermitFeeModifier, { amount: -0.5 });
 });
 
 test('cmty.avoidJail: grants 1 avoidJail inventory item', () => {

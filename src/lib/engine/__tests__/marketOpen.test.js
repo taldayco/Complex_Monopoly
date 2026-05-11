@@ -1,19 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import {
   MARKET_OPEN_TOTAL_TICKS,
   MARKET_OPEN_TICK_INTERVAL_MS,
   startMarketOpen
 } from '../reserve/marketOpen.js';
 import { VOLATILE_STOCK_ORDER } from '../../shared/reserve/stockCatalog.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 function landOnMarketOpen(seatStartPosition, expectedTile) {
   let s = makeRoom(2);

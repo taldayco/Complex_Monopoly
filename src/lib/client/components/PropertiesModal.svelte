@@ -1,5 +1,6 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { fmtCash as fmt } from '$lib/client/format.js';
+  import { actions } from '$lib/client/actions.js';
   import { ui } from '$lib/client/stores.svelte.js';
   import { BOARD, isOwnable } from '$lib/shared/board.js';
   import { COLOR_GROUPS } from '$lib/shared/constants.js';
@@ -10,6 +11,7 @@
     downPaymentDiscount
   } from '$lib/engine/mortgage.js';
   import { getTierByScore } from '$lib/shared/reserve/loanCatalog.js';
+  import { cents, round4 } from '$lib/shared/money.js';
 
   let { state: gs, mySeat } = $props();
 
@@ -32,12 +34,9 @@
     openApplyFor = null;
   }
   function submitApply(idx) {
-    send({
-      type: 'requestMortgageLoan',
-      spaceIndex: idx,
+    actions.requestMortgageLoan({spaceIndex: idx,
       term: applyTerm,
-      downPaymentPct: applyDownPct
-    });
+      downPaymentPct: applyDownPct});
     openApplyFor = null;
   }
 
@@ -47,11 +46,11 @@
     const baseRate = MORTGAGE_TIER_RATES[myTier.name][applyTerm];
     const reserveRate = gs.economy?.reserveRate ?? 0;
     const dpDiscount = downPaymentDiscount(applyDownPct);
-    const ptr = Math.max(0, Math.round((baseRate + reserveRate - dpDiscount) * 10000) / 10000);
-    const downPayment = Math.round((sp.mortgageValue ?? 0) * applyDownPct * 100) / 100;
-    const principal = Math.round((sp.mortgageValue ?? 0) * (1 - applyDownPct) * 100) / 100;
-    const totalDebt = Math.round(principal * (1 + ptr * applyTerm) * 100) / 100;
-    const installment = Math.round((totalDebt / applyTerm) * 100) / 100;
+    const ptr = Math.max(0, round4(baseRate + reserveRate - dpDiscount));
+    const downPayment = cents((sp.mortgageValue ?? 0) * applyDownPct);
+    const principal = cents((sp.mortgageValue ?? 0) * (1 - applyDownPct));
+    const totalDebt = cents(principal * (1 + ptr * applyTerm));
+    const installment = cents(totalDebt / applyTerm);
     return { ptr, downPayment, principal, totalDebt, installment };
   }
 
@@ -82,10 +81,6 @@
     return out.sort((a, b) => a.i - b.i);
   });
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  }
 
   function close() {
     ui.showPropertiesModal = false;
@@ -93,7 +88,7 @@
 
   function sell(i, name) {
     if (!confirm(`Sell ${name} back to the bank?`)) return;
-    send({ type: 'sellPropertyToBank', spaceIndex: i });
+    actions.sellPropertyToBank({spaceIndex: i});
   }
 
   function houseLabel(r) {

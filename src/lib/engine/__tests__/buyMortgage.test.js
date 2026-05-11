@@ -1,15 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import { BUY_MORTGAGE_PTR } from '../../shared/constants.js';
 import { MISSED_PAYMENT_CREDIT_PENALTY } from '../../shared/reserve/loanCatalog.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 function withBuyDecision(seatIndex = 0, spaceIndex = 1, price = 60) {
   const s = makeRoom(2);

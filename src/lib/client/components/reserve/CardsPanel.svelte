@@ -1,5 +1,6 @@
 <script>
-  import { send } from '$lib/client/socket.js';
+  import { fmtCash as fmt } from '$lib/client/format.js';
+  import { actions } from '$lib/client/actions.js';
   import {
     CARD_CATALOG,
     CARD_ORDER,
@@ -17,16 +18,12 @@
   );
   const ownedCardIds = $derived(new Set(owned.map((o) => o.cardId)));
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  }
 
   function apply(cardId) {
-    send({ type: 'requestCreditCard', cardId });
+    actions.requestCreditCard({cardId});
   }
   function cancel(instanceId) {
-    send({ type: 'cancelCreditCard', instanceId });
+    actions.cancelCreditCard({instanceId});
   }
 
   // Per-card pay-amount input. Keyed by instance id so two open cards keep
@@ -35,7 +32,7 @@
   function pay(instanceId) {
     const amount = Number(payAmounts[instanceId]);
     if (!(amount > 0)) return;
-    send({ type: 'payCardBalance', instanceId, amount });
+    actions.payCardBalance({instanceId, amount});
     payAmounts[instanceId] = '';
   }
 

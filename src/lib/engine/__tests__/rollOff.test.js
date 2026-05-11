@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step, stepWithEvents } from './helpers.js';
 
 function makeRollOffRoom(playerCount = 4) {
   const room = makeRoom(playerCount);
@@ -24,12 +24,6 @@ function fakeDiceRng(values) {
   };
 }
 
-function step(state, action, ctx) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error + ' on ' + action.type);
-  return { state: r.state, events: r.events };
-}
-
 test('rollForOrder is the only action accepted in the rollOff phase', () => {
   const s = makeRollOffRoom(2);
   const r = reducer(s, { type: 'rollDice', seat: 0 }, { rng: makeRng() });
@@ -41,12 +35,12 @@ test('happy path: highest goes first, others rotate from their lobby order', () 
   let s = makeRollOffRoom(3);
   const ctx = { rng: fakeDiceRng([3, 4, /*seat0=7*/ 5, 6, /*seat1=11*/ 1, 3 /*seat2=4*/]) };
 
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 0 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 0 }, ctx);
   assert.equal(s.phase, 'rollOff', 'still rolling after seat 0');
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 1 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 1 }, ctx);
   assert.equal(s.phase, 'rollOff', 'still rolling after seat 1');
   let last;
-  ({ state: s, events: last } = step(s, { type: 'rollForOrder', seat: 2 }, ctx));
+  ({ state: s, events: last } = stepWithEvents(s, { type: 'rollForOrder', seat: 2 }, ctx));
 
   assert.equal(s.phase, 'playing');
   assert.equal(s.rollOff, null);
@@ -67,7 +61,7 @@ test('happy path: highest goes first, others rotate from their lobby order', () 
 test('rejects double-roll within the same round', () => {
   let s = makeRollOffRoom(2);
   const ctx = { rng: fakeDiceRng([3, 4, 5, 6]) };
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 0 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 0 }, ctx);
   const r = reducer(s, { type: 'rollForOrder', seat: 0 }, ctx);
   assert.equal(r.ok, false);
   assert.equal(r.error, 'ALREADY_ROLLED');
@@ -95,10 +89,10 @@ test('tie among top scorers re-rolls only the tied seats', () => {
     ])
   };
 
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 0 }, ctx));
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 1 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 0 }, ctx);
+  s = step(s, { type: 'rollForOrder', seat: 1 }, ctx);
   let r1;
-  ({ state: s, events: r1 } = step(s, { type: 'rollForOrder', seat: 2 }, ctx));
+  ({ state: s, events: r1 } = stepWithEvents(s, { type: 'rollForOrder', seat: 2 }, ctx));
 
   assert.equal(s.phase, 'rollOff');
   assert.deepEqual(s.rollOff.contenders.sort(), [0, 1]);
@@ -109,8 +103,8 @@ test('tie among top scorers re-rolls only the tied seats', () => {
   assert.equal(blocked.ok, false);
   assert.equal(blocked.error, 'NOT_CONTENDER');
 
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 0 }, ctx));
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 1 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 0 }, ctx);
+  s = step(s, { type: 'rollForOrder', seat: 1 }, ctx);
 
   assert.equal(s.phase, 'playing');
   assert.equal(s.seats[0].name, 'P0');
@@ -131,18 +125,18 @@ test('two-player tie re-rolls until a unique winner emerges', () => {
     ])
   };
 
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 0 }, ctx));
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 1 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 0 }, ctx);
+  s = step(s, { type: 'rollForOrder', seat: 1 }, ctx);
   assert.equal(s.phase, 'rollOff');
   assert.equal(s.rollOff.round, 2);
 
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 0 }, ctx));
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 1 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 0 }, ctx);
+  s = step(s, { type: 'rollForOrder', seat: 1 }, ctx);
   assert.equal(s.phase, 'rollOff');
   assert.equal(s.rollOff.round, 3);
 
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 0 }, ctx));
-  ({ state: s } = step(s, { type: 'rollForOrder', seat: 1 }, ctx));
+  s = step(s, { type: 'rollForOrder', seat: 0 }, ctx);
+  s = step(s, { type: 'rollForOrder', seat: 1 }, ctx);
   assert.equal(s.phase, 'playing');
   assert.equal(s.seats[0].name, 'P0');
   assert.equal(s.seats[1].name, 'P1');

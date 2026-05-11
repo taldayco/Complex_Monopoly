@@ -1,4 +1,5 @@
 import { BOARD_SIZE, GO_INDEX, GO_SALARY } from '../shared/constants.js';
+import { cents } from '../shared/money.js';
 
 export function rollDice(rng) {
   const d1 = 1 + Math.floor(rng() * 6);
@@ -12,7 +13,7 @@ export function advancePosition(seat, steps, { collectGoOnPass = true } = {}) {
   if (after < 0) after += BOARD_SIZE;
   let passedGo = false;
   if (steps > 0 && collectGoOnPass && (before + steps) >= BOARD_SIZE) {
-    seat.cash = Math.round((seat.cash + GO_SALARY) * 100) / 100;
+    seat.cash = cents(seat.cash + GO_SALARY);
     passedGo = true;
   }
   seat.position = after;

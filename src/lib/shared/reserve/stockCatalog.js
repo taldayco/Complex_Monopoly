@@ -1,11 +1,9 @@
-// Stock catalog ported from monopoly-reserve. Five volatile stocks priced via
-// shuffled card decks; one F&P500 index that tracks the average price of the
-// volatile stocks.
+// Stock catalog. Five volatile stocks priced via shuffled card decks; one
+// F&P500 index that tracks the average price of the volatile stocks.
 //
-// Each volatile stock's deck is the same `BASE_CARDS` distribution (32 cards
-// totalling +0 percent in expectation) plus two wildcards drawn at random
-// from `WILDCARD_POOL` on every (re)shuffle. The per-stock `wildCards` field
-// below is unused at runtime — kept only as a descriptive default.
+// Each volatile stock's deck is the same `BASE_CARDS` distribution (32 cards,
+// expected value 0%) plus two wildcards drawn at random from `WILDCARD_POOL`
+// on every (re)shuffle.
 
 export const VOLATILE_STOCK_ORDER = ['TPHT', 'MNCL', 'CANE', 'RRRD', 'BORR'];
 export const FP500_SYMBOL = 'FP500';
@@ -25,64 +23,19 @@ export const BASE_CARDS = [
 
 // Pool of possible wildcard values. On each (re)shuffle of a volatile stock's
 // deck, two wildcards are picked at random (with replacement) from this pool
-// and mixed into the 32 base cards. The per-stock `wildCards` field below is
-// vestigial — kept only as a starting hint; runtime ignores it in favor of
-// random selection from this pool.
+// and mixed into the 32 base cards.
 export const WILDCARD_POOL = [-100, -50, -25, 25, 50, 100];
 
-// Per-stock characteristics (starting price, shares outstanding, wild cards).
-// `wildCards` are the long-run-bias cards that get mixed into the deck on
-// each reshuffle alongside the standard BASE_CARDS distribution.
 export const STOCK_CATALOG = {
-  TPHT: {
-    symbol: 'TPHT',
-    name: 'TPHT',
-    type: 'volatile',
-    start: 50,
-    sharesOutstanding: 1000,
-    wildCards: [-100, -100]
-  },
-  MNCL: {
-    symbol: 'MNCL',
-    name: 'MNCL',
-    type: 'volatile',
-    start: 20,
-    sharesOutstanding: 1000,
-    wildCards: [-50, 100]
-  },
-  CANE: {
-    symbol: 'CANE',
-    name: 'CANE',
-    type: 'volatile',
-    start: 75,
-    sharesOutstanding: 1000,
-    wildCards: [-25, 25]
-  },
-  RRRD: {
-    symbol: 'RRRD',
-    name: 'RRRD',
-    type: 'volatile',
-    start: 40,
-    sharesOutstanding: 1000,
-    wildCards: [-25, -100]
-  },
-  BORR: {
-    symbol: 'BORR',
-    name: 'BORR',
-    type: 'volatile',
-    start: 35,
-    sharesOutstanding: 1000,
-    wildCards: [25, 50]
-  },
-  [FP500_SYMBOL]: {
-    symbol: FP500_SYMBOL,
-    name: 'F&P500',
-    type: 'index',
-    // The index price is computed from the volatile stocks (see
-    // `recalcFP500` in src/lib/engine/reserve/stocks.js); `start` is just
-    // the seed value before any flips.
-    start: 100
-  }
+  TPHT: { symbol: 'TPHT', name: 'TPHT', type: 'volatile', start: 50, sharesOutstanding: 1000 },
+  MNCL: { symbol: 'MNCL', name: 'MNCL', type: 'volatile', start: 20, sharesOutstanding: 1000 },
+  CANE: { symbol: 'CANE', name: 'CANE', type: 'volatile', start: 75, sharesOutstanding: 1000 },
+  RRRD: { symbol: 'RRRD', name: 'RRRD', type: 'volatile', start: 40, sharesOutstanding: 1000 },
+  BORR: { symbol: 'BORR', name: 'BORR', type: 'volatile', start: 35, sharesOutstanding: 1000 },
+  // The index price is computed from the volatile stocks (see
+  // `recalcFP500` in src/lib/engine/reserve/stocks.js); `start` is just
+  // the seed value before any flips.
+  [FP500_SYMBOL]: { symbol: FP500_SYMBOL, name: 'F&P500', type: 'index', start: 100 }
 };
 
 // Cap on how many price points to retain per stock for charting.

@@ -1,5 +1,6 @@
 import { AUCTION_INCREMENT, AUCTION_DURATION_MS } from '../shared/constants.js';
 import { BOARD } from '../shared/board.js';
+import { cents } from '../shared/money.js';
 
 export const AUCTION_ATTEMPT_FRACTIONS = [0.5, 0.25, 0];
 
@@ -7,7 +8,7 @@ export function startPriceForAttempt(spaceIndex, attempt) {
   const space = BOARD[spaceIndex];
   const price = space?.price ?? 0;
   const fraction = AUCTION_ATTEMPT_FRACTIONS[Math.max(0, Math.min(AUCTION_ATTEMPT_FRACTIONS.length - 1, attempt))];
-  return Math.round(price * fraction * 100) / 100;
+  return cents(price * fraction);
 }
 
 export function createAuction(spaceIndex, attempt = 0, now = Date.now()) {
@@ -69,7 +70,7 @@ export function settle(state, auction) {
     if (seat.cash < auction.currentBid) {
       return { soldTo: null, price: 0, settled: true };
     }
-    seat.cash = Math.round((seat.cash - auction.currentBid) * 100) / 100;
+    seat.cash = cents(seat.cash - auction.currentBid);
     state.properties[auction.spaceIndex].ownerSeat = auction.highBidder;
     return { soldTo: auction.highBidder, price: auction.currentBid, settled: true };
   }

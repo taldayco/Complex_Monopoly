@@ -1,13 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng, giveProperty } from './helpers.js';
-
-function step(state, action, ctx) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
+import { makeRoom, makeRng, giveProperty, step } from './helpers.js';
 
 test('rolling moves the seat and offers buy on unowned property', () => {
   let s = makeRoom(2);
@@ -143,15 +137,16 @@ test('non-doubles original + utility-card rolling accidental doubles does NOT gr
   assert.notEqual(s.turn.seat, 0, 'turn advanced — no bonus');
 });
 
-test('jail-exit doubles do NOT grant a bonus turn at end of turn', () => {
+test('jail-exit doubles grant a bonus turn at end of turn', () => {
   let s = makeRoom(2);
   s.turn = {
     seat: 0,
     phase: 'endable',
     lastRoll: [5, 5],
-    lastRollWasDoubles: false,
-    doublesCount: 0
+    lastRollWasDoubles: true,
+    doublesCount: 1
   };
   s = step(s, { type: 'endTurn', seat: 0 }, { rng: makeRng() });
-  assert.notEqual(s.turn.seat, 0, 'turn advanced — no jail-doubles bonus');
+  assert.equal(s.turn.seat, 0, 'same seat — jail-doubles bonus');
+  assert.equal(s.turn.phase, 'preRoll');
 });

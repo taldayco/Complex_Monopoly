@@ -1,6 +1,7 @@
 <script>
+  import { fmtPrice as fmt, fmtPctDelta as fmtPct, pctClass } from '$lib/client/format.js';
   import { ui } from '$lib/client/stores.svelte.js';
-  import { send } from '$lib/client/socket.js';
+  import { actions } from '$lib/client/actions.js';
   import { STOCK_ORDER, STOCK_CATALOG } from '$lib/shared/reserve/stockCatalog.js';
   import StockChart from './StockChart.svelte';
 
@@ -33,18 +34,6 @@
       : 0
   );
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  function pctClass(p) {
-    if (typeof p !== 'number' || p === 0) return '';
-    return p > 0 ? 'up' : 'down';
-  }
-  function fmtPct(p) {
-    if (typeof p !== 'number') return '—';
-    return (p > 0 ? '+' : '') + p.toFixed(1) + '%';
-  }
   function lastFlipPct(m) {
     return typeof m?.lastFlipPct === 'number' ? m.lastFlipPct : null;
   }
@@ -64,11 +53,11 @@
 
   function buy(sym) {
     const qty = qtyFor(sym);
-    send({ type: 'buyStock', symbol: sym, qty });
+    actions.buyStock({symbol: sym, qty});
   }
   function sell(sym) {
     const qty = qtyFor(sym);
-    send({ type: 'sellStock', symbol: sym, qty });
+    actions.sellStock({symbol: sym, qty});
   }
   function ownedOf(sym) {
     return me?.stockLots?.[sym] ?? 0;

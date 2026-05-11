@@ -1,19 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng } from './helpers.js';
+import { makeRoom, makeRng, step } from './helpers.js';
 import {
   applyEventCard,
   decayTempEffects,
   hasTempEffect
 } from '../reserve/eventCards.js';
 import { VOLATILE_STOCK_ORDER } from '../../shared/reserve/stockCatalog.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 // ---------- decks initialise ----------
 

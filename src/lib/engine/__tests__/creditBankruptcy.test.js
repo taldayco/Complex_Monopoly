@@ -1,15 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng, giveProperty } from './helpers.js';
+import { makeRoom, makeRng, giveProperty, step } from './helpers.js';
 import { checkAndExecuteCreditBankruptcy } from '../bankruptcy.js';
 import { BANKRUPTCY_FLOOR } from '../../shared/reserve/loanCatalog.js';
-
-function step(state, action, ctx = { rng: makeRng() }) {
-  const r = reducer(state, action, ctx);
-  if (!r.ok) throw new Error('reducer error: ' + r.error);
-  return r.state;
-}
 
 test('credit score above 350 → no auto-bankruptcy', () => {
   const room = makeRoom(2);

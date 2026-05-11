@@ -1,4 +1,5 @@
 <script>
+  import { fmtCash as fmt } from '$lib/client/format.js';
   import { getEventCard } from '$lib/shared/reserve/eventCardCatalog.js';
 
   let { card, onClose } = $props();
@@ -19,10 +20,6 @@
       : card.deck
   );
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  }
 
   function describeEffect(eff) {
     switch (eff.kind) {

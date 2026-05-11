@@ -1,4 +1,5 @@
 <script>
+  import { fmtPrice as fmt } from '$lib/client/format.js';
   let {
     history = [],
     width = 480,
@@ -63,10 +64,6 @@
 
   const trend = $derived(stats ? (stats.last >= stats.first ? 'up' : 'down') : 'flat');
 
-  function fmt(v) {
-    if (typeof v !== 'number') return '—';
-    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
 </script>
 
 {#if points.length === 0}
