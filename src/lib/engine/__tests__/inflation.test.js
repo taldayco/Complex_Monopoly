@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducer } from '../reducer.js';
-import { makeRoom, makeRng, giveProperty, step } from './helpers.js';
+import { makeRoom, makeRng, giveProperty, step, stepWithEvents } from './helpers.js';
 import { inflatedPrice } from '../../shared/economy/inflation.js';
 import { computeRent } from '../rent.js';
 import { canBuy, buyProperty } from '../purchase.js';
 import { canBuyHouse } from '../building.js';
+import { cents } from '../../shared/money.js';
 
 
 test('inflatedPrice multiplies by state.economy.inflationFactor', () => {
@@ -140,7 +141,7 @@ test('chance "Speeding fine. Pay $15" inflates with the factor', () => {
 });
 
 
-test('GO_SALARY is nominal (does not inflate)', () => {
+test('GO_SALARY inflates with the economy factor', () => {
   let s = makeRoom(2);
   s.economy.inflationFactor = 2;
   s.seats[0].cash = 0;
@@ -148,5 +149,55 @@ test('GO_SALARY is nominal (does not inflate)', () => {
   let calls = 0;
   const fakeRng = () => (calls++ === 0 ? 0.0 : 0.0);
   s = step(s, { type: 'rollDice', seat: 0 }, { rng: fakeRng });
-  assert.equal(s.seats[0].cash, 100);
+  assert.equal(s.seats[0].cash, 200);
+});
+
+test('end-of-turn cash erosion: inflationary flip erodes seat cash by delta/(1+delta)', () => {
+  let s = makeRoom(2);
+  s.economy.inflationFactor = 1;
+  s.economy.deck = [{ inf: 0.01, wild: false }];
+  s.seats[0].cash = 10000;
+  s.seats[1].cash = 0;
+  s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
+  s = step(s, { type: 'endTurn', seat: 0 });
+  const expected = cents(10000 - cents(10000 * 0.01 / 1.01));
+  assert.equal(s.seats[0].cash, expected);
+});
+
+test('end-of-turn cash erosion: zero when inflationFreeze is active', () => {
+  let s = makeRoom(2);
+  s.economy.inflationFactor = 1;
+  s.economy.tempEffects = [{ kind: 'inflationFreeze', expiresAtTurn: 100 }];
+  s.economy.deck = [{ inf: 0.01, wild: false }];
+  s.seats[0].cash = 10000;
+  s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
+  s = step(s, { type: 'endTurn', seat: 0 });
+  assert.equal(s.seats[0].cash, 10000);
+});
+
+test('end-of-turn cash erosion: skips bankrupt seats', () => {
+  let s = makeRoom(2);
+  s.economy.inflationFactor = 1;
+  s.economy.deck = [{ inf: 0.01, wild: false }];
+  s.seats[0].cash = 10000;
+  s.seats[1].cash = 10000;
+  s.seats[1].bankrupt = true;
+  s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
+  s = step(s, { type: 'endTurn', seat: 0 });
+  assert.equal(s.seats[1].cash, 10000);
+});
+
+test('inflationErosion event payload carries delta, totalEroded, and per-seat breakdown', () => {
+  let s = makeRoom(2);
+  s.economy.inflationFactor = 1;
+  s.economy.deck = [{ inf: 0.01, wild: false }];
+  s.seats[0].cash = 10000;
+  s.seats[1].cash = 5000;
+  s.turn = { seat: 0, phase: 'endable', lastRoll: [3, 5], doublesCount: 0 };
+  const { events } = stepWithEvents(s, { type: 'endTurn', seat: 0 });
+  const ev = events.find((e) => e.type === 'inflationErosion');
+  assert.ok(ev, 'inflationErosion emitted');
+  assert.ok(ev.payload.delta > 0);
+  assert.ok(ev.payload.totalEroded > 0);
+  assert.equal(ev.payload.breakdown.length, 2);
 });

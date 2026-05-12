@@ -54,6 +54,7 @@
       case 'rollAgain': return `${name} rolled doubles — roll again.`;
       case 'skipPlayer': return `${name} was skipped (disconnected).`;
       case 'utilityRoll': return `${name} rolled ${e.payload.d1}+${e.payload.d2} for utility rent.`;
+      case 'inflationErosion': return `Inflation eroded $${Number(e.payload.totalEroded).toFixed(2)} of cash holdings.`;
       default: return `${name ?? '—'}: ${e.type}`;
     }
   }

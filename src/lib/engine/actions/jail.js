@@ -1,9 +1,9 @@
 // Jail actions: try to leave (card / fine / roll), and pick which property to
 // surrender on a three-doubles seizure.
 
-import { GO_SALARY } from '../../shared/constants.js';
 import { attemptJailExit, seizePropertyToBank } from '../jail.js';
 import { advancePosition } from '../movement.js';
+import { inflatedSalary } from '../../shared/economy/inflation.js';
 import { returnCardToDiscard } from '../cards.js';
 import { isCurrentSeat } from '../_helpers.js';
 import { applyGoCardBonuses, resolveLanding } from '../landing.js';
@@ -44,8 +44,8 @@ export function doRollForJail(state, action, ctx, log) {
 
   if (r.released) {
     // If they paid on the third turn (mustPay), don't grant doubles bonus turn.
-    const { passedGo } = advancePosition(seat, r.roll.total);
-    if (passedGo) log('passGo', action.seat, { amount: GO_SALARY });
+    const { passedGo } = advancePosition(state, seat, r.roll.total);
+    if (passedGo) log('passGo', action.seat, { amount: inflatedSalary(state) });
     applyGoCardBonuses(state, action.seat, passedGo, log);
     resolveLanding(state, action.seat, ctx, log, { diceTotal: r.roll.total });
     state.turn.phase = state.pendingAction ? 'resolving' : 'endable';

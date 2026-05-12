@@ -217,7 +217,7 @@ export function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, 
 
   switch (e.kind) {
     case 'moveTo': {
-      const r = moveTo(seat, e.target, { collectGoOnPass: !!e.collectGo });
+      const r = moveTo(state, seat, e.target, { collectGoOnPass: !!e.collectGo });
       applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
       resolveLanding(state, seatIndex, ctx, log, { diceTotal });
@@ -227,9 +227,9 @@ export function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, 
       // "Go back 3" — no GO collection.
       let r;
       if (e.steps < 0) {
-        r = advancePosition(seat, e.steps, { collectGoOnPass: false });
+        r = advancePosition(state, seat, e.steps, { collectGoOnPass: false });
       } else {
-        r = advancePosition(seat, e.steps);
+        r = advancePosition(state, seat, e.steps);
       }
       applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
@@ -238,7 +238,7 @@ export function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, 
     }
     case 'moveToNearestRailroad': {
       const target = nearestRailroadFrom(seat.position + 1);
-      const r = moveTo(seat, target, { collectGoOnPass: true });
+      const r = moveTo(state, seat, target, { collectGoOnPass: true });
       applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
       // Special: if owned, pay 2x rent.
@@ -250,7 +250,7 @@ export function applyCardEffect(state, seatIndex, ctx, log, card, id, deckName, 
     }
     case 'moveToNearestUtility': {
       const target = nearestUtilityFrom(seat.position + 1);
-      const r = moveTo(seat, target, { collectGoOnPass: true });
+      const r = moveTo(state, seat, target, { collectGoOnPass: true });
       applyGoCardBonuses(state, seatIndex, r.passedGo, log);
       returnCardToDiscard(state, deckName, id);
       // Special: if owned, pay 10x dice (regardless of utilities owned). Roll fresh dice.

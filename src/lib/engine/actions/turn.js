@@ -5,8 +5,9 @@
 // continueEndTurnFlow is exported because actions/auction.js needs to drain
 // the pending-auctions queue back into it after settling.
 
-import { GO_SALARY, MAX_DOUBLES } from '../../shared/constants.js';
+import { MAX_DOUBLES } from '../../shared/constants.js';
 import { advancePosition, rollDice as rollDiceFn } from '../movement.js';
+import { inflatedSalary } from '../../shared/economy/inflation.js';
 import { sendToJailWithSeizure } from '../jail.js';
 import { advanceTurn } from '../turn.js';
 import { transferToCreditor, returnToBank, checkGameOver } from '../bankruptcy.js';
@@ -69,8 +70,8 @@ export function doRollDice(state, action, ctx, log) {
 
   log('rollDice', action.seat, { d1: roll.d1, d2: roll.d2, doubles: roll.doubles });
 
-  const { passedGo } = advancePosition(seat, roll.total);
-  if (passedGo) log('passGo', action.seat, { amount: GO_SALARY });
+  const { passedGo } = advancePosition(state, seat, roll.total);
+  if (passedGo) log('passGo', action.seat, { amount: inflatedSalary(state) });
   applyGoCardBonuses(state, action.seat, passedGo, log);
 
   resolveLanding(state, action.seat, ctx, log, { diceTotal: roll.total });
@@ -90,8 +91,9 @@ export function doChooseTrainDestination(state, action, ctx, log) {
   const passedGo = to < from;
   seat.position = to;
   if (passedGo) {
-    seat.cash = cents(seat.cash + GO_SALARY);
-    log('passGo', action.seat, { amount: GO_SALARY });
+    const salary = inflatedSalary(state);
+    seat.cash = cents(seat.cash + salary);
+    log('passGo', action.seat, { amount: salary });
   }
   state.pendingTrainTravel = null;
   log('trainTraveled', action.seat, { fromIdx: from, toIdx: to, passedGo });
@@ -272,22 +274,38 @@ export function continueEndTurnFlow(state, ctx, log) {
   state.turnCount = (state.turnCount ?? 0) + 1;
 
   if (state.economy) {
-    const expired = expireEconomyTempEffects(state.economy, state.turnCount, ctx?.rng);
+    const expired = expireEconomyTempEffects(state.economy, state.turnCount);
     if (expired.length > 0) {
       log('economyTempEffectsExpired', null, { kinds: expired.map((e) => e.kind) });
     }
   }
 
   if (state.economy && ctx?.rng) {
+    const prevFactor = state.economy.inflationFactor;
     const result = flipEconomy(state.economy, ctx.rng);
     state.rngCursor++;
     log('economyFlip', null, {
       card: result.card,
+      policyDelta: result.policyDelta,
       intIgnored: result.intIgnored,
       reshuffled: result.reshuffled,
       reserveRate: result.reserveRate,
       inflationFactor: result.inflationFactor
     });
+    const delta = prevFactor > 0 ? (result.inflationFactor / prevFactor) - 1 : 0;
+    if (delta > 0) {
+      const breakdown = [];
+      let totalEroded = 0;
+      for (const seat of state.seats) {
+        if (seat.bankrupt) continue;
+        const eroded = cents(seat.cash * delta / (1 + delta));
+        if (eroded <= 0) continue;
+        seat.cash = cents(seat.cash - eroded);
+        totalEroded = cents(totalEroded + eroded);
+        breakdown.push({ seat: seat.seat, eroded });
+      }
+      if (totalEroded > 0) log('inflationErosion', null, { delta, totalEroded, breakdown });
+    }
   }
   if (state.stocks && ctx?.rng) {
     const results = flipMarket(state.stocks, ctx.rng);

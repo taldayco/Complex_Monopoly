@@ -92,15 +92,15 @@ test('deposit rejects on closed account; withdraw rejects on insufficient balanc
 });
 
 
-test('applyHysaInterestAtTurnStart: per-bank rate, floored at 0%', () => {
+test('applyHysaInterestAtTurnStart: per-bank rate from depositBeta, floored at 0%', () => {
   const s = freshSeat(0);
   openAccount(s, 'mmcu');
   openAccount(s, 'boardwalk');
   s.bankAccounts.mmcu.balance = 1000;
   s.bankAccounts.boardwalk.balance = 1000;
   applyHysaInterestAtTurnStart(s, 0.04);
-  assert.equal(s.bankAccounts.mmcu.balance, 1030);
-  assert.equal(s.bankAccounts.boardwalk.balance, 1037.5);
+  assert.equal(s.bankAccounts.mmcu.balance, 1016);
+  assert.equal(s.bankAccounts.boardwalk.balance, 1024);
   s.bankAccounts.mmcu.balance = 1000;
   s.bankAccounts.boardwalk.balance = 1000;
   applyHysaInterestAtTurnStart(s, 0);

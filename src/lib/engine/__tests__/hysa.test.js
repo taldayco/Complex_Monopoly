@@ -25,24 +25,24 @@ test('applyHysaInterestAtTurnStart: pays into each open account at bank-derived 
   const seat = makeSeatWithBoth(1000, 1000);
   const events = applyHysaInterestAtTurnStart(seat, 0.04);
   assert.equal(events.length, 2);
-  assert.equal(seat.bankAccounts.mmcu.balance, 1030);
-  assert.equal(seat.bankAccounts.boardwalk.balance, 1037.5);
+  assert.equal(seat.bankAccounts.mmcu.balance, 1016);
+  assert.equal(seat.bankAccounts.boardwalk.balance, 1024);
 });
 
-test('applyHysaInterestAtTurnStart: floors at 0% when bank-derived rate is negative', () => {
+test('applyHysaInterestAtTurnStart: boardwalk has higher deposit beta than mmcu', () => {
   const seat = makeSeatWithBoth(1000, 1000);
-  const events = applyHysaInterestAtTurnStart(seat, 0.005);
-  assert.equal(seat.bankAccounts.mmcu.balance, 1000);
-  assert.equal(seat.bankAccounts.boardwalk.balance, 1002.5);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].bank, 'boardwalk');
+  const events = applyHysaInterestAtTurnStart(seat, 0.05);
+  assert.equal(events.length, 2);
+  assert.equal(seat.bankAccounts.mmcu.balance, 1020);
+  assert.equal(seat.bankAccounts.boardwalk.balance, 1030);
+  assert.ok(seat.bankAccounts.boardwalk.balance > seat.bankAccounts.mmcu.balance);
 });
 
 test('applyHysaInterestAtTurnStart: card hysaBonus stacks on top of bank rate', () => {
   const seat = makeSeatWithBoth(1000, 0);
   seat.creditCards = [{ id: 'CC-rr', cardId: 'readingRail', status: 'active' }];
   applyHysaInterestAtTurnStart(seat, 0.03);
-  assert.equal(seat.bankAccounts.mmcu.balance, 1030);
+  assert.equal(seat.bankAccounts.mmcu.balance, 1022);
 });
 
 test('applyHysaInterestAtTurnStart: no interest into closed account or seat.cash', () => {

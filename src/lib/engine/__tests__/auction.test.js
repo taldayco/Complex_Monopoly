@@ -53,6 +53,7 @@ test('auction settles early when only one seat can still afford the next bid', (
   s.seats[0].cash = 1000;
   s.seats[1].cash = 5;
   s.seats[2].cash = 5;
+  s.economy.tempEffects = [{ kind: 'inflationFreeze', expiresAtTurn: 1_000_000 }];
   setEndable(s, 0);
   s.pendingAuctions = [{ spaceIndex: 1, declinedBy: 0 }];
   s = step(s, { type: 'endTurn', seat: 0 });

@@ -73,7 +73,7 @@ export function applyHysaInterestAtTurnStart(seat, reserveRate) {
     if (!acct.open) continue;
     const balance = acct.balance ?? 0;
     if (balance <= 0) continue;
-    const baseRate = (reserveRate ?? 0) + BANKS[id].hysaSpread;
+    const baseRate = (reserveRate ?? 0) * BANKS[id].depositBeta + BANKS[id].hysaSpread;
     const rate = Math.max(0, baseRate + cardBonus);
     if (rate <= 0) continue;
     const interest = cents(balance * rate);

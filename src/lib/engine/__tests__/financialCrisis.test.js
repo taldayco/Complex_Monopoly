@@ -35,7 +35,7 @@ test('flipEconomy suppresses inflationFactor delta while inflationFreeze is acti
   const s = makeRoom(2);
   s.economy.inflationFactor = 1;
   s.economy.tempEffects = [{ kind: 'inflationFreeze', expiresAtTurn: 100 }];
-  s.economy.deck = [{ inf: 0.5, int: 0, wild: false }];
+  s.economy.deck = [{ inf: 0.5, wild: false }];
   flipEconomy(s.economy, makeRng());
   assert.equal(s.economy.inflationFactor, 1);
 });
@@ -44,30 +44,22 @@ test('flipEconomy suppresses reserveRate delta while interestFreeze is active', 
   const s = makeRoom(2);
   s.economy.reserveRate = 0;
   s.economy.tempEffects = [{ kind: 'interestFreeze', expiresAtTurn: 100 }];
-  s.economy.deck = [{ inf: 0, int: 0.05, wild: false }];
+  s.economy.deck = [{ inf: 0, wild: false }];
   flipEconomy(s.economy, makeRng());
   assert.equal(s.economy.reserveRate, 0);
 });
 
-test('expireEconomyTempEffects removes expired entries and resets inflation on inflationFreeze expiry', () => {
+test('expireEconomyTempEffects removes expired entries and preserves inflationFactor on inflationFreeze expiry', () => {
   const s = makeRoom(2);
   s.economy.inflationFactor = 1.5;
   s.economy.tempEffects = [
     { kind: 'inflationFreeze', expiresAtTurn: 5 },
     { kind: 'interestFreeze', expiresAtTurn: 8 }
   ];
-  const expired = expireEconomyTempEffects(s.economy, 5, makeRng());
+  const expired = expireEconomyTempEffects(s.economy, 5);
   assert.equal(expired.length, 1);
   assert.equal(expired[0].kind, 'inflationFreeze');
   assert.equal(s.economy.tempEffects.length, 1);
   assert.equal(s.economy.tempEffects[0].kind, 'interestFreeze');
-  assert.equal(s.economy.inflationFactor, 1);
-});
-
-test('expireEconomyTempEffects rebuilds deck on inflationFreeze expiry', () => {
-  const s = makeRoom(2);
-  s.economy.deck = [];
-  s.economy.tempEffects = [{ kind: 'inflationFreeze', expiresAtTurn: 5 }];
-  expireEconomyTempEffects(s.economy, 5, makeRng());
-  assert.ok(s.economy.deck.length > 0);
+  assert.equal(s.economy.inflationFactor, 1.5);
 });
